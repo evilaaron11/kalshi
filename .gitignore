@@ -1,0 +1,19 @@
+# Secrets and credentials
+.env
+*.pem
+*.pem.txt
+*_private*
+
+# Claude session data
+.claude/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# Results / output
+results/
