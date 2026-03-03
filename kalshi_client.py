@@ -93,9 +93,12 @@ def fetch_market(ticker: str) -> dict:
 
     if response.status_code == 404:
         # Might be an event ticker — try listing markets under it
-        event_markets = fetch_event_markets(ticker)
-        if event_markets:
-            return {"type": "event", "event_ticker": ticker, "markets": event_markets}
+        qualifying, sub_threshold = fetch_event_markets(ticker)
+        if qualifying:
+            result = {"type": "event", "event_ticker": ticker, "markets": qualifying}
+            if sub_threshold:
+                result["sub_threshold_markets"] = sub_threshold
+            return result
         raise ValueError(f"No market or event found for ticker: {ticker}")
     if response.status_code in (401, 403):
         raise PermissionError(
@@ -105,25 +108,42 @@ def fetch_market(ticker: str) -> dict:
         raise RuntimeError(f"API error (HTTP {response.status_code}): {response.text}")
 
     data = response.json()
-    return parse_market(data.get("market", data), ticker)
+    market = parse_market(data.get("market", data), ticker)
+    if market.get("status") == "finalized":
+        print(f"Warning: market {ticker} is already finalized", file=sys.stderr)
+    return market
 
 
-def fetch_event_markets(event_ticker: str, top_n: int = 3) -> list:
-    """Return the top N markets under an event ticker, sorted by yes_price descending."""
+def fetch_event_markets(event_ticker: str, min_yes_price: float = 0.05) -> tuple:
+    """Return (qualifying, sub_threshold) active market lists.
+
+    qualifying: markets with yes_price >= min_yes_price, sorted by yes_price desc
+    sub_threshold: markets with 0 < yes_price < min_yes_price, sorted by yes_price desc
+    """
     path = f"{KALSHI_API_PATH}/markets"
     headers = build_auth_headers("GET", path)
     response = requests.get(
         f"{KALSHI_HOST}{path}",
         headers=headers,
-        params={"limit": 50, "event_ticker": event_ticker},
+        params={"limit": 100, "event_ticker": event_ticker},
         timeout=10,
     )
     if not response.ok:
-        return []
+        return [], []
     markets = [parse_market(m) for m in response.json().get("markets", [])]
-    # Sort by yes_price descending, filter out None prices
-    markets.sort(key=lambda m: m.get("yes_price") or 0, reverse=True)
-    return markets[:top_n]
+    open_markets = [m for m in markets if m.get("status") != "finalized"]
+    if not open_markets:
+        # All markets resolved — fall back to all so the caller can report it
+        open_markets = markets
+    qualifying = [m for m in open_markets if (m.get("yes_price") or 0) >= min_yes_price]
+    sub_threshold = [m for m in open_markets if 0 < (m.get("yes_price") or 0) < min_yes_price]
+    if not qualifying:
+        # Nothing qualifies — return all as qualifying so caller can report it
+        qualifying = open_markets
+        sub_threshold = []
+    qualifying.sort(key=lambda m: m.get("yes_price") or 0, reverse=True)
+    sub_threshold.sort(key=lambda m: m.get("yes_price") or 0, reverse=True)
+    return qualifying, sub_threshold
 
 
 if __name__ == "__main__":
