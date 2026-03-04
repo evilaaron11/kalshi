@@ -4,8 +4,9 @@
 *.pem.txt
 *_private*
 
-# Claude session data
-.claude/
+# Claude session data (exclude everything except commands/skills)
+.claude/*
+!.claude/commands/
 
 # Python
 __pycache__/
