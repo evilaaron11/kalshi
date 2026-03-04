@@ -54,7 +54,7 @@ Produce a concise bullet-point summary of:
 Factual only. No interpretation. Label each bullet with source and date.
 ```
 
-**Devil's Advocate Agent (model: sonnet)**
+**Devil's Advocate Agent (model: haiku)**
 ```
 You are a contrarian analyst. Argue against the consensus outcome for this prediction market.
 
@@ -125,7 +125,7 @@ For each scenario:
 Be creative. Think about second-order effects, sudden reversals, key-person risks, institutional failures, and external shocks. Avoid scenarios already discussed in the news.
 ```
 
-### Step 5 — Run Calibrator (model: opus)
+### Step 5 — Run Calibrator (model: sonnet)
 
 ```
 You are an expert superforecaster. Synthesize research from a panel of analysts into a final probability estimate.
@@ -243,7 +243,7 @@ Also flag any outcomes below 5% that are getting significant news coverage.
 Label every bullet with source and date. Factual only — no probability estimates.
 ```
 
-**Devil's Advocate Agent (model: sonnet)**
+**Devil's Advocate Agent (model: haiku)**
 ```
 You are a contrarian analyst challenging the market's ranking of outcomes.
 
@@ -320,7 +320,7 @@ For each scenario:
 Be creative. Think about second-order effects, sudden reversals, key-person risks, institutional failures, and external shocks. Avoid scenarios already discussed in the news.
 ```
 
-### Step 5 — Run Calibrator (model: opus)
+### Step 5 — Run Calibrator (model: sonnet)
 
 ```
 You are an expert superforecaster. Synthesize research from a panel of analysts and produce a ranked assessment of all qualifying outcomes for this multi-outcome prediction market.
