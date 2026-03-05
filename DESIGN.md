@@ -2,7 +2,7 @@
 
 ## Overview
 
-A research assistant that helps evaluate Kalshi prediction markets. The user identifies markets where they believe they have an edge; the system fetches market data and relevant news, then runs a panel of Claude subagents to produce a structured probability estimate.
+A research assistant that helps evaluate Kalshi prediction markets. The user identifies a market; the system fetches live market data, then runs a sequential-then-parallel panel of Claude subagents that research from scratch and accumulate a shared knowledge pool, producing a structured probability estimate with a betting recommendation.
 
 All AI analysis runs through Claude Code (Claude Pro subscription). No separate Anthropic API key required. Invoked via the `/analyze-market` custom slash command.
 
@@ -20,7 +20,6 @@ kalshi/
 ├── .env                         # API keys (never commit)
 ├── requirements.txt             # Python dependencies
 ├── kalshi_client.py             # Kalshi API wrapper
-├── news_fetcher.py              # NewsAPI + RSS aggregator
 └── DESIGN.md                    # This file
 ```
 
@@ -28,7 +27,7 @@ kalshi/
 
 ## Invocation
 
-From within this project directory in Claude Code, the user types:
+From within this project directory in Claude Code:
 
 ```
 /analyze-market https://kalshi.com/markets/TRUMPBUDGET-25MAR01
@@ -47,33 +46,37 @@ Claude Code reads `.claude/commands/analyze-market.md`, which contains the full 
   kalshi_client.py
   → parse ticker from URL
   → GET /markets/{ticker}
-  → output: title, description, resolution criteria,
+  → output: title, resolution criteria,
             yes_price, close_date, volume
             │
             ▼
-  Claude Code generates 3-5 search queries
-  from market title + resolution criteria
-            │
-            ▼
-  news_fetcher.py <query1> <query2> ...
-  → fetch NewsAPI (keyword search, sorted by recency)
-  → fetch RSS feeds (Reuters, AP, Politico, The Hill,
-                     Fox News Politics, NPR)
-  → deduplicate, rank by recency
-  → output: top 15 articles (title, source, date, snippet, url)
-            │
-            ▼
   ┌─────────────────────────────────────────┐
-  │         Parallel Subagents              │
+  │  Phase 1 — Sequential Research         │
   │                                         │
   │  [Evidence Agent]    model: haiku       │
-  │  [Devil's Advocate]  model: sonnet      │
-  │  [Resolution Agent]  model: sonnet      │
+  │  → up to 7 searches, builds pool       │
+  │            │                            │
+  │            ▼                            │
+  │  [Devil's Advocate]  model: haiku       │
+  │  → gets Evidence output + sources pool  │
+  │  → up to 5 searches for gaps, extends   │
   └─────────────────────────────────────────┘
             │
             ▼
-  [Calibrator Agent]    model: opus
-  → reads all three subagent outputs
+  ┌─────────────────────────────────────────┐
+  │  Phase 2 — Sequential Analysis          │
+  │                                         │
+  │  [Resolution Agent]  model: sonnet      │
+  │            │                            │
+  │            ▼                            │
+  │  [Chaos Agent]       model: haiku       │
+  │  → both receive full research from      │
+  │    Evidence + Devil's Advocate          │
+  └─────────────────────────────────────────┘
+            │
+            ▼
+  [Calibrator Agent]    model: sonnet
+  → synthesizes all four agent outputs
   → produces final report
             │
             ▼
@@ -86,17 +89,17 @@ Claude Code reads `.claude/commands/analyze-market.md`, which contains the full 
 ## Python Scripts
 
 ### `kalshi_client.py`
-- Accepts a Kalshi market URL as a CLI argument
+- Accepts a Kalshi market URL or ticker as a CLI argument
 - Parses the ticker from the URL path
-- Calls `GET https://trading-api.kalshi.com/trade-api/v2/markets/{ticker}`
-- Auth: `Authorization: Bearer {KALSHI_API_KEY}` header
+- Calls `GET https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}`
+- Auth: RSA-signed request headers (`KALSHI-ACCESS-KEY`, `KALSHI-ACCESS-SIGNATURE`)
+- For event tickers (404 on market endpoint), falls back to listing all markets under that event
 - Outputs JSON to stdout:
 
 ```json
 {
   "ticker": "TRUMPBUDGET-25MAR01",
   "title": "Will Trump sign the budget bill by March 1?",
-  "description": "...",
   "resolution_criteria": "...",
   "yes_price": 0.34,
   "no_price": 0.66,
@@ -106,143 +109,79 @@ Claude Code reads `.claude/commands/analyze-market.md`, which contains the full 
 }
 ```
 
-### `news_fetcher.py`
-- Accepts search query strings as CLI arguments
-- Queries NewsAPI `/v2/everything` for each query (sorted by `publishedAt`)
-- Fetches and parses RSS feeds via `feedparser`
-- Deduplicates by URL
-- Sorts all results by date descending
-- Outputs JSON to stdout:
-
-```json
-[
-  {
-    "title": "Senate passes budget cloture 54-46",
-    "source": "Reuters",
-    "published": "2025-02-24T14:30:00Z",
-    "snippet": "...",
-    "url": "https://..."
-  }
-]
-```
-
-### RSS Feeds
-| Source | Feed URL |
-|--------|----------|
-| Reuters Politics | `https://feeds.reuters.com/reuters/politicsNews` |
-| AP Politics | `https://feeds.apnews.com/rss/politics` |
-| Politico | `https://rss.politico.com/politics-news.xml` |
-| The Hill | `https://thehill.com/feed` |
-| Fox News Politics | `https://feeds.foxnews.com/foxnews/politics` |
-| NPR Politics | `https://feeds.npr.org/1014/rss.xml` |
+For events, outputs `"type": "event"` with a `markets` array of qualifying outcomes (yes_price ≥ 5%) and optionally a `sub_threshold_markets` array.
 
 ---
 
 ## Slash Command — `.claude/commands/analyze-market.md`
 
-This file defines what happens when `/analyze-market <URL>` is invoked. It contains step-by-step orchestration instructions for Claude Code:
+Full orchestration instructions for Claude Code. The pipeline:
 
-1. Extract the URL from the command argument
-2. Run `kalshi_client.py` with the URL, parse the JSON output
-3. Generate 3-5 targeted search queries from the market title and resolution criteria
-4. Run `news_fetcher.py` with those queries, parse the JSON output
-5. Spawn Evidence, Devil's Advocate, and Resolution agents in parallel (Task tool)
-6. Pass all three outputs to the Calibrator agent (Task tool)
-7. Display the final report in chat
-8. Save the report to `results/YYYY-MM-DD_TICKER.md`
+1. Fetch market data via `kalshi_client.py`
+2. Run **Evidence Agent** — up to 7 searches, outputs factual summary + `## SOURCES POOL`
+3. Run **Devil's Advocate** — up to 5 searches for gaps, outputs counterarguments + `## ADDITIONAL SOURCES`
+4. Merge sources pool from both agents
+5. Run **Resolution Agent** — receives Evidence + DA research, max 1 search
+6. Run **Chaos Agent** — receives Evidence + DA research, max 1 search
+7. Run **Calibrator** — synthesizes all four outputs, no additional search
+8. Display report, save to `results/YYYY-MM-DD_TICKER.md`
 
 ---
 
 ## Subagent Panel
 
-All subagents are spawned via Claude Code's Task tool. Each receives the same base context: market data + news articles.
+All subagents are spawned via Claude Code's Task tool. Phase 1 runs sequentially so research accumulates into a shared pool. Phase 2 also runs sequentially in the foreground — Resolution then Chaos — since each takes under a minute and foreground execution is more reliable than background task polling.
+
+### Search Policies
+
+| Agent | Search | Rationale |
+|-------|--------|-----------|
+| Evidence Agent | Max 7 | Factual backbone — use all if warranted, breadth first |
+| Devil's Advocate | Max 5 | Contrarian gaps only — don't re-research the pool |
+| Resolution Agent | Max 1 | May need to verify a specific resolution ambiguity |
+| Chaos Agent | Max 1 | Tail risks are hypothetical; deep research is wasteful |
+| Calibrator | None | Synthesizes from agent outputs only |
 
 ### Evidence Agent — `haiku`
-**Mandate:** Establish the factual state of play.
+**Mandate:** Establish the factual state of play via active research.
+- Uses WebSearch as primary tool
+- Outputs bullet-point factual summary (no interpretation)
+- Ends response with `## SOURCES POOL` — list of every source consulted
 
-Prompt focus:
-- What has actually happened that is relevant to this market?
-- What events are scheduled before the close date?
-- What have key actors (Trump, Congress members, officials) said publicly?
-- What do other prediction markets (Polymarket, Metaculus) show if mentioned in sources?
-
-Output: Bullet-point factual summary, no interpretation.
-
----
-
-### Devil's Advocate Agent — `sonnet`
-**Mandate:** Argue against the obvious/consensus outcome.
-
-Prompt focus:
-- What is the market currently implying (yes_price)?
-- What is the strongest case that the consensus is wrong?
-- What historical precedents suggest this could fail?
-- What wild cards or black swans are plausible before close?
-
-Output: Numbered list of counterarguments, ranked by strength.
-
----
+### Devil's Advocate — `haiku`
+**Mandate:** Argue against the consensus outcome using research the Evidence Agent missed.
+- Receives Evidence Agent's full output + sources pool
+- Focuses searches on counterevidence, historical precedents, contrarian data
+- Outputs numbered counterarguments ranked by strength
+- Ends response with `## ADDITIONAL SOURCES`
 
 ### Resolution Agent — `sonnet`
-**Mandate:** Analyze the exact resolution criteria.
+**Mandate:** Analyze the exact resolution criteria for gotchas and edge cases.
+- Receives both Phase 1 outputs
+- Focuses on precise YES/NO conditions, ambiguities, timing technicalities
 
-Prompt focus:
-- What are the precise conditions for YES resolution?
-- Are there ambiguities in the wording?
-- Are there technical edge cases (partial fulfillment, timing, definitions)?
-- Who resolves this market and do they have a track record of strict vs. loose interpretation?
+### Chaos Agent — `haiku`
+**Mandate:** Generate specific, creative tail risk scenarios (1–8% probability each).
+- Receives both Phase 1 outputs
+- Focuses on scenarios not currently priced or discussed
 
-Output: Resolution criteria breakdown with any flags or edge cases noted.
-
----
-
-### Calibrator Agent — `opus`
-**Mandate:** Synthesize all inputs into a final probability estimate.
-
-Receives: market data + news + all three agent outputs.
-
-Prompt focus:
-- What probability (0–100) would a well-calibrated superforecaster assign to YES?
-- What is the key crux — the single most important factor?
-- Explicit bull case (reasons YES)
-- Explicit bear case (reasons NO)
-- Confidence level: low / medium / high
-
-Output structure:
-```
-MARKET:     [title]
-CLOSES:     [date] | VOLUME: $[volume]
-─────────────────────────────────────────────────────
-ESTIMATED PROBABILITY: X%
-MARKET PRICE:          Y%
-EDGE:                  +/- Z% → [lean YES / lean NO]
-CONFIDENCE:            low / medium / high
-CRUX:                  [single sentence]
-
-BULL CASE:
-- ...
-
-BEAR CASE:
-- ...
-
-KEY SOURCES:
-- [title] — [source] ([age])
-```
+### Calibrator — `sonnet`
+**Mandate:** Synthesize all research into a final probability estimate and betting recommendation.
+- Receives all four agent outputs
+- Produces structured report with edge, bull/bear case, tail risks, Kelly-sized bet sizing, and explicit probability methodology
 
 ---
 
 ## Results Persistence
 
-Each completed analysis is saved to `results/YYYY-MM-DD_TICKER.md`.
-
-File contains:
+Each completed analysis is saved to `results/YYYY-MM-DD_TICKER.md` containing:
 - Full Calibrator report
 - Market data snapshot (price at time of analysis)
-- News articles used (titles, sources, dates)
-- Individual subagent outputs (Evidence, Devil's Advocate, Resolution)
-- Timestamp of analysis
+- All subagent outputs (Evidence, Devil's Advocate, Resolution, Chaos)
+- Accumulated sources pool
+- Timestamp
 
-This allows reviewing past analyses, comparing estimated probability vs. how markets actually resolved, and identifying patterns in where the system has edge.
+This allows reviewing past analyses, comparing estimated probability vs. actual resolution, and identifying where the system has edge.
 
 ---
 
@@ -250,7 +189,7 @@ This allows reviewing past analyses, comparing estimated probability vs. how mar
 
 ```
 KALSHI_API_KEY=your_kalshi_readonly_key
-NEWS_API_KEY=your_newsapi_key
+KALSHI_PRIVATE_KEY_PATH=./kalshi_private.pem
 ```
 
 ---
@@ -259,7 +198,7 @@ NEWS_API_KEY=your_newsapi_key
 
 ```
 requests
-feedparser
+cryptography
 python-dotenv
 ```
 
@@ -268,7 +207,5 @@ python-dotenv
 ## Constraints & Notes
 
 - Kalshi API key is **read-only** — no order placement, data fetching only
-- NewsAPI free tier: 100 requests/day — sufficient for manual single-market analysis
-- RSS feeds are free and unlimited
-- All AI calls run under Claude Pro subscription via Claude Code Task tool
-- `.env` should be added to `.gitignore` if this project is ever version controlled
+- All AI calls and WebSearch run under Claude Pro subscription via Claude Code
+- `.env` and `*.pem` should be in `.gitignore`

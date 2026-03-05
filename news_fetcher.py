@@ -1,62 +1,101 @@
 import sys
 import json
 import os
+import time
+import argparse
 from datetime import datetime, timezone
-from urllib.parse import urlencode
 import requests
 import feedparser
 from dotenv import load_dotenv
 
 load_dotenv()
 
-NEWSAPI_BASE = "https://newsapi.org/v2/everything"
+BRAVE_LLM_CONTEXT_BASE = "https://api.search.brave.com/res/v1/llm/context"
 MAX_ARTICLES = 15
 
 RSS_FEEDS = [
+    # Politics
     ("Reuters Politics", "https://feeds.reuters.com/reuters/politicsNews"),
     ("AP Politics", "https://feeds.apnews.com/rss/politics"),
     ("Politico", "https://rss.politico.com/politics-news.xml"),
     ("The Hill", "https://thehill.com/feed"),
     ("Fox News Politics", "https://feeds.foxnews.com/foxnews/politics"),
     ("NPR Politics", "https://feeds.npr.org/1014/rss.xml"),
+    # Finance & Economy
+    ("Reuters Business", "https://feeds.reuters.com/reuters/businessNews"),
+    ("CNBC Markets", "https://www.cnbc.com/id/100003114/device/rss/rss.html"),
+    ("MarketWatch", "https://feeds.content.dowjones.io/public/rss/mw_realtimeheadlines"),
+    ("Yahoo Finance", "https://finance.yahoo.com/news/rssindex"),
+    # Culture & Entertainment
+    ("Variety", "https://variety.com/feed/"),
+    ("Deadline", "https://deadline.com/feed/"),
+    ("Hollywood Reporter", "https://www.hollywoodreporter.com/feed/"),
+    ("Rolling Stone", "https://www.rollingstone.com/feed/"),
+    # Tech (light coverage)
+    ("The Verge", "https://www.theverge.com/rss/index.xml"),
+    ("Ars Technica", "http://feeds.arstechnica.com/arstechnica/index"),
 ]
 
-
-def fetch_newsapi(queries: list[str]) -> list[dict]:
-    api_key = os.getenv("NEWS_API_KEY")
+def fetch_brave_llm_context(queries: list[str]) -> list[dict]:
+    """Fetch web content via Brave LLM Context API — returns extracted article text
+    optimized for model consumption, not just meta description snippets."""
+    api_key = os.getenv("BRAVE_API_KEY")
     if not api_key:
         return []
 
     articles = []
     seen_urls = set()
 
-    for query in queries:
-        params = {
-            "q": query,
-            "language": "en",
-            "sortBy": "publishedAt",
-            "pageSize": 10,
-            "apiKey": api_key,
-        }
+    for i, query in enumerate(queries):
+        if i > 0:
+            time.sleep(0.1)  # Stay well under the 50 req/s limit
         try:
-            resp = requests.get(NEWSAPI_BASE, params=params, timeout=10)
+            resp = requests.get(
+                BRAVE_LLM_CONTEXT_BASE,
+                headers={
+                    "X-Subscription-Token": api_key,
+                    "Accept": "application/json",
+                },
+                params={
+                    "q": query,
+                    "country": "US",
+                    "search_lang": "en",
+                    "context_threshold_mode": "balanced",
+                },
+                timeout=15,
+            )
             resp.raise_for_status()
             data = resp.json()
-            for a in data.get("articles", []):
-                url = a.get("url", "")
-                if url and url not in seen_urls:
-                    seen_urls.add(url)
-                    articles.append({
-                        "title": a.get("title", ""),
-                        "source": a.get("source", {}).get("name", "NewsAPI"),
-                        "published": a.get("publishedAt", ""),
-                        "snippet": a.get("description") or a.get("content", ""),
-                        "url": url,
-                    })
+
+            # sources is a dict keyed by URL; age is [human-readable, ISO date, relative]
+            source_meta = data.get("sources", {})
+
+            # Extract articles from grounding.generic[]
+            for item in data.get("grounding", {}).get("generic", []):
+                url = item.get("url", "")
+                if not url or url in seen_urls:
+                    continue
+                seen_urls.add(url)
+
+                meta = source_meta.get(url, {})
+                age = meta.get("age", [])
+                published = age[1] if isinstance(age, list) and len(age) > 1 else ""
+
+                snippets = item.get("snippets", [])
+                snippet_text = " … ".join(snippets)[:3000] if snippets else ""
+
+                articles.append({
+                    "title": item.get("title") or meta.get("title", ""),
+                    "source": meta.get("hostname", "Brave Search"),
+                    "published": published,
+                    "snippet": snippet_text,
+                    "url": url,
+                })
         except Exception as e:
-            print(f"NewsAPI error for query '{query}': {e}", file=sys.stderr)
+            print(f"Brave LLM Context error for query '{query}': {e}", file=sys.stderr)
 
     return articles
+
 
 
 def parse_rss_date(entry) -> str:
@@ -70,14 +109,30 @@ def parse_rss_date(entry) -> str:
     return ""
 
 
-def fetch_rss_feeds(queries: list[str]) -> list[dict]:
-    """Fetch all RSS feeds and filter entries that match any query term."""
-    query_terms = set()
-    for q in queries:
-        for word in q.lower().split():
-            if len(word) > 3:  # skip short words
-                query_terms.add(word)
+def query_matches(text: str, query: str) -> bool:
+    """Return True if the article text is relevant to the query.
 
+    Matches if the full query phrase appears, or if at least 2 significant
+    words from the query appear (prevents single-word false positives).
+    """
+    text_lower = text.lower()
+    query_lower = query.lower()
+
+    if query_lower in text_lower:
+        return True
+
+    words = [w for w in query_lower.split() if len(w) > 3]
+    if not words:
+        return False
+    if len(words) == 1:
+        return words[0] in text_lower
+
+    matches = sum(1 for w in words if w in text_lower)
+    return matches >= 2
+
+
+def fetch_rss_feeds(queries: list[str]) -> list[dict]:
+    """Fetch all RSS feeds and filter entries that match any query."""
     articles = []
     seen_urls = set()
 
@@ -88,10 +143,9 @@ def fetch_rss_feeds(queries: list[str]) -> list[dict]:
                 title = entry.get("title", "")
                 summary = entry.get("summary", "")
                 url = entry.get("link", "")
-                text = (title + " " + summary).lower()
+                text = title + " " + summary
 
-                # Include if any query term appears in the article
-                if any(term in text for term in query_terms):
+                if any(query_matches(text, q) for q in queries):
                     if url and url not in seen_urls:
                         seen_urls.add(url)
                         articles.append({
@@ -117,7 +171,6 @@ def sort_and_deduplicate(articles: list[dict]) -> list[dict]:
             seen.add(url)
             unique.append(a)
 
-    # Sort by published date descending (empty dates go last)
     def sort_key(a):
         pub = a.get("published", "")
         return pub if pub else "0"
@@ -127,16 +180,14 @@ def sort_and_deduplicate(articles: list[dict]) -> list[dict]:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python news_fetcher.py <query1> [query2] ...", file=sys.stderr)
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Fetch news articles for Kalshi market analysis.")
+    parser.add_argument("queries", nargs="+", help="Search queries")
+    args = parser.parse_args()
 
-    queries = sys.argv[1:]
+    brave_articles = fetch_brave_llm_context(args.queries)
+    rss_articles = fetch_rss_feeds(args.queries)
 
-    newsapi_articles = fetch_newsapi(queries)
-    rss_articles = fetch_rss_feeds(queries)
-
-    all_articles = newsapi_articles + rss_articles
+    all_articles = brave_articles + rss_articles
     final = sort_and_deduplicate(all_articles)
 
     print(json.dumps(final, indent=2))
