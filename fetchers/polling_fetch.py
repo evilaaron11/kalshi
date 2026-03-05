@@ -9,10 +9,10 @@ Two sources:
 NOT raw polls — returns the most recently reported average/aggregate where available.
 
 Usage (callable by agents via Bash):
-    python polling_fetch.py --race "Georgia Senate 2026"
-    python polling_fetch.py --race "Wisconsin Governor 2026"
-    python polling_fetch.py --race "presidential 2028" --source wikipedia
-    python polling_fetch.py --source rcp                     # generic ballot + top races
+    python -m fetchers.polling_fetch --race "Georgia Senate 2026"
+    python -m fetchers.polling_fetch --race "Wisconsin Governor 2026"
+    python -m fetchers.polling_fetch --race "presidential 2028" --source wikipedia
+    python -m fetchers.polling_fetch --source rcp                     # generic ballot + top races
 
 Output: JSON array of { race, source_name, date, candidates, avg_or_latest, url }
 """
@@ -20,18 +20,11 @@ Output: JSON array of { race, source_name, date, candidates, avg_or_latest, url 
 import sys
 import json
 import argparse
-import requests
 from bs4 import BeautifulSoup
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate",  # no 'br' — requests can't decode Brotli natively
-    "Referer": "https://www.google.com/",
-}
-WIKIPEDIA_API = "https://en.wikipedia.org/w/api.php"
-RCP_LATEST    = "https://www.realclearpolitics.com/epolls/latest_polls/"
+from src.config import WIKIPEDIA_API, RCP_LATEST, RCP_REQUEST_TIMEOUT, BROWSER_HEADERS
+from src import http_client
+from src.text_utils import matches_query
 
 
 # ---------------------------------------------------------------------------
@@ -48,34 +41,31 @@ def wikipedia_search(query: str) -> list[dict]:
         "srlimit":  5,
         "format":   "json",
     }
-    try:
-        resp = requests.get(WIKIPEDIA_API, params=params, headers=HEADERS, timeout=10)
-        resp.raise_for_status()
-        hits = resp.json().get("query", {}).get("search", [])
-        # Return top results — election articles contain polling sections even without "polling" in title
-        return hits[:3]
-    except Exception as e:
-        print(f"Wikipedia search error: {e}", file=sys.stderr)
+    resp = http_client.get(WIKIPEDIA_API, params=params,
+                           headers=BROWSER_HEADERS, timeout=10)
+    if not resp:
         return []
+    hits = resp.json().get("query", {}).get("search", [])
+    return hits[:3]
 
 
 def fetch_wikipedia_polling(title: str) -> list[dict]:
     """Fetch a Wikipedia polling article and extract poll tables."""
     url = f"https://en.wikipedia.org/wiki/{title.replace(' ', '_')}"
+    resp = http_client.get(url, headers=BROWSER_HEADERS, timeout=15)
+    if not resp:
+        return []
+
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=15)
-        resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
 
         results = []
-        # Wikipedia polling tables are wikitables — find all of them
         for table in soup.find_all("table", class_="wikitable"):
             headers_row = table.find("tr")
             if not headers_row:
                 continue
             col_headers = [th.get_text(strip=True) for th in headers_row.find_all(["th", "td"])]
 
-            # Skip non-polling tables (finance, results, debates, endorsements)
             headers_joined = " ".join(col_headers).lower()
             if "poll" not in headers_joined:
                 continue
@@ -106,7 +96,6 @@ def query_wikipedia(race: str) -> list[dict]:
     hits = wikipedia_search(race)
     if not hits:
         return []
-    # Use the top result
     title = hits[0]["title"]
     return fetch_wikipedia_polling(title)
 
@@ -118,18 +107,18 @@ def query_wikipedia(race: str) -> list[dict]:
 def fetch_rcp(race_filter: str = "") -> list[dict]:
     """Scrape RCP latest polls listing for current averages."""
     results = []
+    resp = http_client.get(RCP_LATEST, headers=BROWSER_HEADERS, timeout=RCP_REQUEST_TIMEOUT)
+    if not resp:
+        return []
+
     try:
-        resp = requests.get(RCP_LATEST, headers=HEADERS, timeout=15)
-        resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        # RCP now uses one <tr data-id="..."> per race, each with a single <td>
         for row in soup.find_all("tr", attrs={"data-id": True}):
             td = row.find("td")
             if not td:
                 continue
 
-            # Race title is in the first <a> inside the row
             title_link = td.find("a", href=True)
             if not title_link:
                 continue
@@ -137,14 +126,8 @@ def fetch_rcp(race_filter: str = "") -> list[dict]:
             race_name = race_name.get_text(strip=True) if race_name else title_link.get_text(strip=True)
             if not race_name:
                 continue
-            if race_filter:
-                rf = race_filter.lower()
-                rn = race_name.lower()
-                # Use words > 4 chars to skip generic tokens like "2026", "the"
-                words = [w for w in rf.split() if len(w) > 4]
-                threshold = min(2, len(words)) if words else 1
-                if rf not in rn and not (words and sum(1 for w in words if w in rn) >= threshold):
-                    continue
+            if race_filter and not matches_query(race_name, race_filter):
+                continue
 
             href = title_link.get("href", "")
             race_url = ("https://www.realclearpolitics.com" + href

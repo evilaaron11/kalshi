@@ -11,8 +11,7 @@ from cryptography.hazmat.primitives.asymmetric import padding
 
 load_dotenv()
 
-KALSHI_HOST = "https://api.elections.kalshi.com"
-KALSHI_API_PATH = "/trade-api/v2"
+from src.config import KALSHI_HOST, KALSHI_API_PATH, KALSHI_REQUEST_TIMEOUT
 
 
 def load_private_key():
@@ -89,7 +88,7 @@ def parse_market(market: dict, ticker: str = "") -> dict:
 def fetch_market(ticker: str) -> dict:
     path = f"{KALSHI_API_PATH}/markets/{ticker}"
     headers = build_auth_headers("GET", path)
-    response = requests.get(f"{KALSHI_HOST}{path}", headers=headers, timeout=10)
+    response = requests.get(f"{KALSHI_HOST}{path}", headers=headers, timeout=KALSHI_REQUEST_TIMEOUT)
 
     if response.status_code == 404:
         # Might be an event ticker — try listing markets under it
@@ -126,7 +125,7 @@ def fetch_event_markets(event_ticker: str, min_yes_price: float = 0.05) -> tuple
         f"{KALSHI_HOST}{path}",
         headers=headers,
         params={"limit": 100, "event_ticker": event_ticker},
-        timeout=10,
+        timeout=KALSHI_REQUEST_TIMEOUT,
     )
     if not response.ok:
         return [], []

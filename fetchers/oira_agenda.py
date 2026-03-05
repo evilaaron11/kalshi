@@ -1,15 +1,19 @@
 """oira_agenda.py — Query the federal regulatory pipeline
 
-Two data sources:
+Two independent data sources, one domain:
   1. Federal Register API (federalregister.gov) — published/recent rules
-  2. OIRA Unified Agenda (reginfo.gov)          — forward-looking pipeline
+     Frequency: Daily or near-daily updates. Good for current status.
+  2. OIRA Unified Agenda (reginfo.gov XML) — forward-looking pipeline
+     Frequency: Semi-annual (Spring April, Fall October). Good for future plans.
+
+Both return the same output schema: list of {title, agency, stage, abstract, url, source}.
 
 Usage (callable by agents via Bash):
-    python oira_agenda.py --search "tariffs"
-    python oira_agenda.py --search "DOGE federal workforce" --agency "OPM"
-    python oira_agenda.py --search "immigration" --stage final
-    python oira_agenda.py --search "energy" --source unified   # pipeline only
-    python oira_agenda.py --search "EPA climate" --source fedreg --limit 10
+    python -m fetchers.oira_agenda --search "tariffs"
+    python -m fetchers.oira_agenda --search "DOGE federal workforce" --agency "OPM"
+    python -m fetchers.oira_agenda --search "immigration" --stage final
+    python -m fetchers.oira_agenda --search "energy" --source unified   # pipeline only
+    python -m fetchers.oira_agenda --search "EPA climate" --source fedreg --limit 10
 
 Output: JSON array of { title, agency, stage, abstract, url, source }
 
@@ -20,21 +24,20 @@ Stages (Unified Agenda):   Pre-Rule Stage, Proposed Rule Stage, Final Rule Stage
 import sys
 import json
 import argparse
-import requests
 from xml.etree import ElementTree as ET
 
-FEDREG_API   = "https://www.federalregister.gov/api/v1/documents.json"
-# Unified Agenda XML — published semi-annually (Spring=04, Fall=10).
-# Update UNIFIED_PUB_ID when a new edition is released.
-UNIFIED_PUB_ID = "202504"
-UNIFIED_URL    = f"https://www.reginfo.gov/public/do/XMLViewFileAction?f=REGINFO_RIN_DATA_{UNIFIED_PUB_ID}.xml"
+from src.config import (
+    FEDERAL_REGISTER_API, FEDERAL_REGISTER_TIMEOUT,
+    OIRA_PUBLICATION_ID, OIRA_XML_URL, OIRA_REQUEST_TIMEOUT,
+)
+from src import http_client
+from src.text_utils import strip_html
 
 HEADERS = {"User-Agent": "kalshi-analyst/1.0 (research tool)"}
 
 
 def fetch_fedreg(query: str, agency: str, stage: str, limit: int) -> list[dict]:
     """Query the Federal Register API for matching documents."""
-    # Map friendly stage names to FR document types
     stage_map = {
         "proposed": "PROPOSED_RULE",
         "final":    "RULE",
@@ -42,7 +45,6 @@ def fetch_fedreg(query: str, agency: str, stage: str, limit: int) -> list[dict]:
         "eo":       "PRESIDENTIAL_DOCUMENT",
     }
 
-    # Use list of tuples — required for repeated array params (fields[], conditions[type][])
     fields = ["title", "agencies", "type", "publication_date", "abstract", "html_url", "action"]
     params = [
         ("conditions[term]", query),
@@ -55,16 +57,13 @@ def fetch_fedreg(query: str, agency: str, stage: str, limit: int) -> list[dict]:
     if agency:
         params.append(("conditions[agency_ids][]", agency))
 
-    try:
-        resp = requests.get(FEDREG_API, params=params, headers=HEADERS, timeout=15)
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception as e:
-        print(f"Federal Register API error: {e}", file=sys.stderr)
+    resp = http_client.get(FEDERAL_REGISTER_API, params=params,
+                           headers=HEADERS, timeout=FEDERAL_REGISTER_TIMEOUT)
+    if not resp:
         return []
 
     results = []
-    for doc in data.get("results", []):
+    for doc in resp.json().get("results", []):
         agency_names = [a.get("name", "") for a in doc.get("agencies", [])]
         results.append({
             "title":     doc.get("title", ""),
@@ -79,32 +78,10 @@ def fetch_fedreg(query: str, agency: str, stage: str, limit: int) -> list[dict]:
     return results
 
 
-def _strip_html(text: str) -> str:
-    """Strip HTML tags from a string (abstracts in the unified agenda contain inline HTML)."""
-    try:
-        from html.parser import HTMLParser
-
-        class _Stripper(HTMLParser):
-            def __init__(self):
-                super().__init__()
-                self.parts = []
-            def handle_data(self, data):
-                self.parts.append(data)
-
-        s = _Stripper()
-        s.feed(text)
-        return " ".join(s.parts).strip()
-    except Exception:
-        return text
-
-
 def fetch_unified_agenda(query: str, agency: str, stage: str, limit: int) -> list[dict]:
     """Fetch OIRA Unified Agenda (forward-looking pipeline) via reginfo.gov XML."""
-    try:
-        resp = requests.get(UNIFIED_URL, headers=HEADERS, timeout=60)
-        resp.raise_for_status()
-    except Exception as e:
-        print(f"OIRA Unified Agenda fetch error: {e}", file=sys.stderr)
+    resp = http_client.get(OIRA_XML_URL, headers=HEADERS, timeout=OIRA_REQUEST_TIMEOUT)
+    if not resp:
         return []
 
     try:
@@ -113,7 +90,6 @@ def fetch_unified_agenda(query: str, agency: str, stage: str, limit: int) -> lis
         print(f"OIRA XML parse error: {e}", file=sys.stderr)
         return []
 
-    # Map user-friendly stage names to substrings of RULE_STAGE values in the XML
     stage_map = {
         "pre_rule":  "prerule",
         "proposed":  "proposed rule",
@@ -137,7 +113,7 @@ def fetch_unified_agenda(query: str, agency: str, stage: str, limit: int) -> lis
         title_text    = (title_el.text    or "").strip() if title_el    is not None else ""
         stage_text    = (stage_el.text    or "").strip() if stage_el    is not None else ""
         abstract_raw  = (abstract_el.text or "").strip() if abstract_el is not None else ""
-        abstract_text = _strip_html(abstract_raw)
+        abstract_text = strip_html(abstract_raw)
         agency_name   = (agency_el.text   or "").strip() if agency_el   is not None else ""
         parent_name   = (parent_el.text   or "").strip() if parent_el   is not None else ""
         agency_text   = f"{parent_name} / {agency_name}" if parent_name and parent_name != agency_name else agency_name
@@ -160,7 +136,7 @@ def fetch_unified_agenda(query: str, agency: str, stage: str, limit: int) -> lis
             "stage":    stage_text,
             "rin":      rin_text,
             "abstract": abstract_text[:1500],
-            "url":      f"https://www.reginfo.gov/public/do/eAgendaViewRule?pubId={UNIFIED_PUB_ID}&RIN={rin_text}" if rin_text else "",
+            "url":      f"https://www.reginfo.gov/public/do/eAgendaViewRule?pubId={OIRA_PUBLICATION_ID}&RIN={rin_text}" if rin_text else "",
             "source":   "oira_unified_agenda",
         })
 

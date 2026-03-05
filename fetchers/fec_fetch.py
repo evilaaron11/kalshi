@@ -4,10 +4,10 @@ Uses the FEC public API. No API key required (1000 req/hour with DEMO_KEY).
 Set FEC_API_KEY in .env for higher rate limits (register free at api.open.fec.gov).
 
 Usage (callable by agents via Bash):
-    python fec_fetch.py --candidate "Jon Ossoff"
-    python fec_fetch.py --candidate "Georgia" --office S --state GA --cycle 2026
-    python fec_fetch.py --candidate "Trump" --office P --cycle 2024
-    python fec_fetch.py --committee "Save America" --limit 5
+    python -m fetchers.fec_fetch --candidate "Jon Ossoff"
+    python -m fetchers.fec_fetch --candidate "Georgia" --office S --state GA --cycle 2026
+    python -m fetchers.fec_fetch --candidate "Trump" --office P --cycle 2024
+    python -m fetchers.fec_fetch --committee "Save America" --limit 5
 
 Key signal: cash_on_hand is often a stronger predictor than polling,
 especially in primaries. burn_rate > 1.0 means spending more than raising.
@@ -21,17 +21,18 @@ import sys
 import json
 import os
 import argparse
-import requests
 from dotenv import load_dotenv
+
+from src.config import FEC_API_BASE, FEC_DEFAULT_API_KEY, FEC_REQUEST_TIMEOUT, FEC_PER_PAGE_LIMIT
+from src import http_client
 
 load_dotenv()
 
-FEC_BASE = "https://api.open.fec.gov/v1"
-HEADERS  = {"User-Agent": "kalshi-analyst/1.0"}
+HEADERS = {"User-Agent": "kalshi-analyst/1.0"}
 
 
 def api_key() -> str:
-    return os.getenv("FEC_API_KEY", "DEMO_KEY")
+    return os.getenv("FEC_API_KEY", FEC_DEFAULT_API_KEY)
 
 
 def search_candidates(name: str, office: str, state: str, cycle: int, limit: int) -> list[dict]:
@@ -39,20 +40,15 @@ def search_candidates(name: str, office: str, state: str, cycle: int, limit: int
         "api_key":  api_key(),
         "q":        name,
         "sort":     "-receipts",
-        "per_page": min(limit, 20),
+        "per_page": min(limit, FEC_PER_PAGE_LIMIT),
     }
     if office: params["office"] = office.upper()
     if state:  params["state"]  = state.upper()
     if cycle:  params["cycle"]  = cycle
 
-    try:
-        resp = requests.get(f"{FEC_BASE}/candidates/totals/",
-                            params=params, headers=HEADERS, timeout=15)
-        resp.raise_for_status()
-        return resp.json().get("results", [])
-    except Exception as e:
-        print(f"FEC candidates API error: {e}", file=sys.stderr)
-        return []
+    resp = http_client.get(f"{FEC_API_BASE}/candidates/totals/",
+                           params=params, headers=HEADERS, timeout=FEC_REQUEST_TIMEOUT)
+    return resp.json().get("results", []) if resp else []
 
 
 def search_committees(name: str, limit: int) -> list[dict]:
@@ -60,16 +56,11 @@ def search_committees(name: str, limit: int) -> list[dict]:
         "api_key":  api_key(),
         "q":        name,
         "sort":     "-last_cash_on_hand_end_period",
-        "per_page": min(limit, 20),
+        "per_page": min(limit, FEC_PER_PAGE_LIMIT),
     }
-    try:
-        resp = requests.get(f"{FEC_BASE}/committees/",
-                            params=params, headers=HEADERS, timeout=15)
-        resp.raise_for_status()
-        return resp.json().get("results", [])
-    except Exception as e:
-        print(f"FEC committees API error: {e}", file=sys.stderr)
-        return []
+    resp = http_client.get(f"{FEC_API_BASE}/committees/",
+                           params=params, headers=HEADERS, timeout=FEC_REQUEST_TIMEOUT)
+    return resp.json().get("results", []) if resp else []
 
 
 def format_candidate(c: dict) -> dict:

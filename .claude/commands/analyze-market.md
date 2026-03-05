@@ -35,24 +35,24 @@ CURRENT YES PRICE: {yes_price}
 
 AVAILABLE RESEARCH TOOLS (callable via Bash — use when clearly relevant to this market):
 
-  python whitehouse_fetch.py --search "<topic>" --type [eos|briefings|statements|all] --limit 5
+  python -m fetchers.whitehouse_fetch --search "<topic>" --type [eos|briefings|statements|all] --limit 5
   → Full primary source text from whitehouse.gov: executive orders, proclamations, memoranda,
     press secretary briefing transcripts, and official statements.
   → Use for: any market about presidential actions, executive orders, vetoes, pardons,
     nominations, tariffs, sanctions, or "will Trump do/sign/announce X" questions.
 
-  python oira_agenda.py --search "<topic>" --source [fedreg|unified|both] --limit 10
+  python -m fetchers.oira_agenda --search "<topic>" --source [fedreg|unified|both] --limit 10
   → Federal regulatory pipeline: recently published rules (Federal Register) and rules
     planned but not yet published (OIRA Unified Agenda).
   → Use for: markets about agency rulemaking, regulatory deadlines, or "will X rule be finalized."
 
-  python fec_fetch.py --candidate "<name>" [--office P|S|H] [--state XX] [--cycle YYYY]
-  python fec_fetch.py --committee "<PAC name>"
+  python -m fetchers.fec_fetch --candidate "<name>" [--office P|S|H] [--state XX] [--cycle YYYY]
+  python -m fetchers.fec_fetch --committee "<PAC name>"
   → FEC campaign finance: cash on hand, total raised, total spent, burn rate per candidate.
   → Use for: any electoral market where fundraising signals likely matter (primaries especially).
     Cash on hand is often a stronger predictor than polling, particularly in low-information races.
 
-  python polling_fetch.py --race "<state office year>" [--source wikipedia|rcp|both]
+  python -m fetchers.polling_fetch --race "<state office year>" [--source wikipedia|rcp|both]
   → Polling averages from Wikipedia election articles and RealClearPolitics.
   → Use for: electoral markets — who wins a race, margin questions, generic ballot.
     Returns the most recent polling averages, not raw individual polls.
@@ -287,24 +287,24 @@ QUALIFYING OUTCOMES (yes_price ≥ 5%, sorted by probability):
 
 AVAILABLE RESEARCH TOOLS (callable via Bash — use when clearly relevant to this event):
 
-  python whitehouse_fetch.py --search "<topic>" --type [eos|briefings|statements|all] --limit 5
+  python -m fetchers.whitehouse_fetch --search "<topic>" --type [eos|briefings|statements|all] --limit 5
   → Full primary source text from whitehouse.gov: executive orders, proclamations, memoranda,
     press secretary briefing transcripts, and official statements.
   → Use for: any event about presidential actions, executive orders, vetoes, pardons,
     nominations, tariffs, sanctions, or "will Trump do/sign/announce X" questions.
 
-  python oira_agenda.py --search "<topic>" --source [fedreg|unified|both] --limit 10
+  python -m fetchers.oira_agenda --search "<topic>" --source [fedreg|unified|both] --limit 10
   → Federal regulatory pipeline: recently published rules (Federal Register) and rules
     planned but not yet published (OIRA Unified Agenda).
   → Use for: events about agency rulemaking, regulatory deadlines, or "will X rule be finalized."
 
-  python fec_fetch.py --candidate "<name>" [--office P|S|H] [--state XX] [--cycle YYYY]
-  python fec_fetch.py --committee "<PAC name>"
+  python -m fetchers.fec_fetch --candidate "<name>" [--office P|S|H] [--state XX] [--cycle YYYY]
+  python -m fetchers.fec_fetch --committee "<PAC name>"
   → FEC campaign finance: cash on hand, total raised, total spent, burn rate per candidate.
   → Use for: any electoral event where fundraising signals likely matter (primaries especially).
     Cash on hand is often a stronger predictor than polling, particularly in low-information races.
 
-  python polling_fetch.py --race "<state office year>" [--source wikipedia|rcp|both]
+  python -m fetchers.polling_fetch --race "<state office year>" [--source wikipedia|rcp|both]
   → Polling averages from Wikipedia election articles and RealClearPolitics.
   → Use for: electoral events — who wins a race, margin questions, generic ballot.
     Returns the most recent polling averages, not raw individual polls.
