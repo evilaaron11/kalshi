@@ -39,6 +39,16 @@ WHITEHOUSE_MAX_FEED_ITEMS = 30
 WHITEHOUSE_MAX_TEXT_CHARS = 8000
 WHITEHOUSE_REQUEST_DELAY = 0.4
 
+# Polymarket (no auth required)
+POLYMARKET_API_BASE = "https://gamma-api.polymarket.com"
+POLYMARKET_REQUEST_TIMEOUT = 15
+POLYMARKET_SEARCH_LIMIT = 5
+
+# Metaculus (requires API token)
+METACULUS_API_BASE = "https://www.metaculus.com/api"
+METACULUS_REQUEST_TIMEOUT = 15
+METACULUS_SEARCH_LIMIT = 5
+
 # Shared defaults
 DEFAULT_USER_AGENT = "kalshi-analyst/1.0"
 BROWSER_HEADERS = {

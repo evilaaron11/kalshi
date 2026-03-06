@@ -18,17 +18,17 @@ Resolution and Chaos agents run sequentially in the foreground instead of as bac
 ### Primary source tools — electoral markets ✓
 `fec_fetch.py`: FEC public API for candidate campaign finance (cash on hand, total raised, burn rate). `polling_fetch.py`: Wikipedia election polling articles + RealClearPolitics for current averages. Both wired into the Evidence Agent prompt.
 
+### Cross-market price signals ✓
+`cross_market.py`: searches Polymarket (no auth) and Metaculus (token required) for matching markets by keyword. Returns platform, title, probability, volume, and URL. Wired into both Evidence Agent (always called) and Calibrator (CROSS-MARKET COMPARISON section, flags ≥5pp gaps as arbitrage). Polymarket confirmed working; Metaculus requires `METACULUS_TOKEN` env var.
+
 ---
 
 ## Highest Leverage (not yet built)
 
-### 1. Cross-market price signals
-Pull Polymarket, Metaculus, or PredictIt prices for the same event and feed them to the Calibrator. Even a simple "Polymarket has this at 34% vs Kalshi's 28%" is meaningful signal — these crowds have already aggregated information. Buildable now: Polymarket has a public API, Metaculus has a public API.
-
-### 2. Base rate database
+### 1. Base rate database
 Build a SQLite table of past Kalshi markets (ticker, category, resolution, close_date, final_price_at_close). Agents can query: "how often do markets in this category priced at ~30% actually resolve YES?" This is reference class forecasting — the single biggest unlock in superforecasting methodology.
 
-### 3. Economic indicator primary data
+### 2. Economic indicator primary data
 For CPI, jobs, Fed rate, and GDP markets: agents currently infer the data from articles that may be stale or summarized incorrectly. Direct sources:
 - **FRED API** (fred.stlouisfed.org/docs/api): free, no key required, returns time-series data for thousands of economic indicators
 - **BLS API** (bls.gov/developers): CPI, unemployment, PPI direct from the source

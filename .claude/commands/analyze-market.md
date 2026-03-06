@@ -57,6 +57,12 @@ AVAILABLE RESEARCH TOOLS (callable via Bash — use when clearly relevant to thi
   → Use for: electoral markets — who wins a race, margin questions, generic ballot.
     Returns the most recent polling averages, not raw individual polls.
 
+  python -m fetchers.cross_market --query "<market topic keywords>"
+  → Cross-platform price comparison: searches Polymarket and Metaculus for matching markets.
+  → ALWAYS call this tool. Use 2-4 keywords from the market title as the query.
+  → Returns: platform, title, probability, volume/forecasters, URL for each match.
+  → Critical for arbitrage detection — price gaps between platforms are actionable signal.
+
 These return structured primary data that news articles often summarize incompletely or inaccurately.
 Call them alongside web search — they do not count against your 7-search limit.
 
@@ -68,7 +74,7 @@ Produce:
    - What has actually happened relevant to this market resolving YES or NO
    - Events scheduled before the close date that could affect resolution
    - What key actors have said or done publicly
-   - Any signals from related prediction markets (Polymarket, Metaculus, PredictIt)
+   - Cross-market prices: what Polymarket, Metaculus, and any other platforms price this event at (from cross_market tool output)
 
    Factual only. No interpretation. Label each bullet with source and date.
 
@@ -128,9 +134,9 @@ Wait for Devil's Advocate to complete before proceeding.
 
 Append Devil's Advocate's `## ADDITIONAL SOURCES` to the sources pool. You now have the full accumulated research pool.
 
-### Step 6 — Run Resolution Agent, then Chaos Agent
+### Step 6 — Run Resolution Agent and Chaos Agent in parallel
 
-Launch sequentially in the foreground.
+Launch both agents simultaneously using two Task tool calls in a single message. They share the same inputs and are independent of each other.
 
 **Resolution Agent (model: sonnet)**
 ```
@@ -248,8 +254,11 @@ KEY SOURCES:
 ANALYST NOTES:
 [2–3 sentences of free-form commentary]
 
+CROSS-MARKET COMPARISON:
+[If the Evidence Agent found matching markets on Polymarket or Metaculus, list them here with prices side-by-side vs Kalshi. Flag any price gaps ≥ 5pp as potential arbitrage. If no matches found, write "No cross-market matches found."]
+
 BETTING RECOMMENDATION ($100 BANKROLL):
-[How you would allocate up to $100 across YES/NO positions on this market. You do not need to deploy all $100 — size to edge and confidence. For each position: state YES or NO, dollar amount, price paid, contracts purchased, and the specific thesis. Explain what you hold back and why. Account for tail risks that could wipe multiple positions simultaneously. Use half-Kelly sizing given medium confidence unless confidence is high.]
+[How you would allocate up to $100 across YES/NO positions on this market. You do not need to deploy all $100 — size to edge and confidence. For each position: state YES or NO, dollar amount, price paid, contracts purchased, and the specific thesis. Explain what you hold back and why. Account for tail risks that could wipe multiple positions simultaneously. Use half-Kelly sizing given medium confidence unless confidence is high. If cross-market arbitrage exists, note whether the edge is vs Polymarket/Metaculus pricing and factor that into conviction.]
 
 PROBABILITY METHODOLOGY:
 [Explain exactly how you arrived at the estimated probability. Cover: (1) what base rate or anchor you started from, (2) which evidence pushed it up or down and by roughly how much, (3) how you weighted conflicting signals (e.g. bull vs bear case), (4) what you are most uncertain about in your own estimate, and (5) whether this is a judgment call, a base-rate adjustment, or something more quantitative. Be explicit enough that the reader can critique your reasoning and adjust the estimate themselves.]
@@ -257,9 +266,35 @@ PROBABILITY METHODOLOGY:
 Be honest about uncertainty. Do not round to clean numbers unless genuinely warranted.
 ```
 
-### Step 8 — Save and Display
+### Step 8 — Save, Compare, and Display
 
-Display the Calibrator report. Save full results to `results/YYYY-MM-DD_{TICKER}.md` including all subagent outputs, accumulated sources pool, market snapshot, and timestamp.
+**Check for prior analysis:** Before saving, search `results/` for any existing files matching `*_{TICKER}.md` (glob pattern). If a prior analysis exists:
+- If it is from **today** (same YYYY-MM-DD in the filename): skip the delta — just save the new one alongside it.
+- If it is from a **prior day**: read the prior file's Calibrator Report section and append a `## Delta Analysis` section to the NEW file (see format below).
+
+**Save** the full results to `results/YYYY-MM-DD_HHMM_{TICKER}.md` (24-hour time, e.g. `2026-03-05_1430_KXSENATEILD-26.md`). Include all subagent outputs, accumulated sources pool, market snapshot, and timestamp.
+
+**Delta Analysis format** (appended only when a prior-day analysis exists):
+```
+## Delta Analysis
+**Previous analysis:** {prior_filename} ({prior_date})
+
+| Metric | Previous | Current | Change |
+|--------|----------|---------|--------|
+| Market Price | X% | Y% | +/-Z pp |
+| Estimated Prob | X% | Y% | +/-Z pp |
+| Edge | X% | Y% | +/-Z pp |
+| Confidence | low/med/high | low/med/high | — |
+
+**What changed:**
+- [Bullet each material change in the factual picture, new evidence, or shifted reasoning]
+- [Note any new sources not in the prior analysis]
+- [Flag if the direction of the edge flipped]
+
+**Verdict:** [One sentence: is this a confirming update (same thesis, tighter), a reversing update (thesis changed), or a drift (small moves, no new info)?]
+```
+
+Display the Calibrator report (and Delta Analysis if present) to the user.
 
 ---
 
@@ -309,6 +344,12 @@ AVAILABLE RESEARCH TOOLS (callable via Bash — use when clearly relevant to thi
   → Use for: electoral events — who wins a race, margin questions, generic ballot.
     Returns the most recent polling averages, not raw individual polls.
 
+  python -m fetchers.cross_market --query "<event topic keywords>"
+  → Cross-platform price comparison: searches Polymarket and Metaculus for matching markets.
+  → ALWAYS call this tool. Use 2-4 keywords from the event title as the query.
+  → Returns: platform, title, probability, volume/forecasters, URL for each match.
+  → Critical for arbitrage detection — price gaps between platforms are actionable signal.
+
 These return structured primary data that news articles often summarize incompletely or inaccurately.
 Call them alongside web search — they do not count against your 7-search limit.
 
@@ -316,7 +357,7 @@ Research this event. For each outcome, find recent news, statements from key dec
 
 Produce:
 
-1. For each outcome, a factual summary of what the research says about its likelihood. Note relevant facts, statements, timelines, or context. Also flag any outcomes below 5% that are getting significant news coverage.
+1. For each outcome, a factual summary of what the research says about its likelihood. Note relevant facts, statements, timelines, or context. Also flag any outcomes below 5% that are getting significant news coverage. Include cross-market prices from Polymarket/Metaculus if matching markets were found.
 
    Label every bullet with source and date. Factual only — no probability estimates.
 
@@ -372,9 +413,9 @@ Wait for Devil's Advocate to complete.
 
 Append Devil's Advocate's `## ADDITIONAL SOURCES` to the pool.
 
-### Step 6 — Run Resolution Agent, then Chaos Agent
+### Step 6 — Run Resolution Agent and Chaos Agent in parallel
 
-Launch sequentially in the foreground.
+Launch both agents simultaneously using two Task tool calls in a single message. They share the same inputs and are independent of each other.
 
 **Resolution Agent (model: sonnet)**
 ```
@@ -499,8 +540,11 @@ KEY SOURCES:
 ANALYST NOTES:
 [2–3 sentences of free-form commentary — biggest uncertainty, what to watch for]
 
+CROSS-MARKET COMPARISON:
+[If the Evidence Agent found matching markets on Polymarket or Metaculus, list them here with prices side-by-side vs Kalshi. Flag any price gaps ≥ 5pp as potential arbitrage. If no matches found, write "No cross-market matches found."]
+
 BETTING RECOMMENDATION ($100 BANKROLL):
-[How you would allocate up to $100 across YES/NO positions on these markets. You do not need to deploy all $100 — size to edge and confidence. For each position: state which market, YES or NO, dollar amount, price paid, and the specific thesis. Note correlations between outcomes. Explain what you hold back and why. Account for tail risks. Use half-Kelly sizing given medium confidence unless confidence is high.]
+[How you would allocate up to $100 across YES/NO positions on these markets. You do not need to deploy all $100 — size to edge and confidence. For each position: state which market, YES or NO, dollar amount, price paid, and the specific thesis. Note correlations between outcomes. Explain what you hold back and why. Account for tail risks. Use half-Kelly sizing given medium confidence unless confidence is high. If cross-market arbitrage exists, note whether the edge is vs Polymarket/Metaculus pricing and factor that into conviction.]
 
 PROBABILITY METHODOLOGY:
 [For each outcome you estimated, explain exactly how you arrived at the number. Cover: (1) what base rate or anchor you started from, (2) which evidence pushed each estimate up or down and by roughly how much, (3) how you weighted conflicting signals across the panel, (4) what you are most uncertain about, and (5) whether this is a judgment call, a base-rate adjustment, or something more quantitative.]
@@ -508,6 +552,29 @@ PROBABILITY METHODOLOGY:
 Do not round probabilities to clean numbers unless genuinely warranted. Be honest about uncertainty.
 ```
 
-### Step 8 — Save and Display
+### Step 8 — Save, Compare, and Display
 
-Display the Calibrator report. Save full results to `results/YYYY-MM-DD_{EVENT_TICKER}.md` including all subagent outputs, accumulated sources pool, market snapshots, and timestamp.
+**Check for prior analysis:** Before saving, search `results/` for any existing files matching `*_{EVENT_TICKER}.md` (glob pattern). If a prior analysis exists:
+- If it is from **today** (same YYYY-MM-DD in the filename): skip the delta — just save the new one alongside it.
+- If it is from a **prior day**: read the prior file's Calibrator Report section and append a `## Delta Analysis` section to the NEW file (see format below).
+
+**Save** the full results to `results/YYYY-MM-DD_HHMM_{EVENT_TICKER}.md` (24-hour time). Include all subagent outputs, accumulated sources pool, market snapshots, and timestamp.
+
+**Delta Analysis format** (appended only when a prior-day analysis exists):
+```
+## Delta Analysis
+**Previous analysis:** {prior_filename} ({prior_date})
+
+| Outcome | Prev Price | Curr Price | Prev Est | Curr Est | Price Move | Estimate Move |
+|---------|-----------|-----------|---------|---------|------------|---------------|
+| {name}  | X%        | Y%        | X%      | Y%      | +/-Z pp    | +/-Z pp       |
+
+**What changed:**
+- [Bullet each material change in the factual picture, new evidence, or shifted reasoning]
+- [Note any new sources not in the prior analysis]
+- [Flag if the ranking of outcomes changed or any edge directions flipped]
+
+**Verdict:** [One sentence: confirming update, reversing update, or drift?]
+```
+
+Display the Calibrator report (and Delta Analysis if present) to the user.
