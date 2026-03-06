@@ -109,6 +109,68 @@ The Calibrator produces a structured report including:
 
 Results are saved to `results/YYYY-MM-DD_{TICKER}.md`.
 
+## Web App (in progress)
+
+A locally hosted web UI for the analysis pipeline. Lives on the `webapp` branch under `webapp/`.
+
+**Stack:** Next.js (React/TypeScript/Tailwind) frontend + FastAPI (Python) backend, connected via SSE for real-time pipeline progress.
+
+### Running locally
+
+```bash
+# Backend (from repo root)
+python -m uvicorn webapp.backend.main:app --reload --port 8000
+
+# Frontend (separate terminal)
+cd webapp/frontend; npm run dev
+```
+
+Frontend at `http://localhost:3000`, backend at `http://localhost:8000`.
+
+### What's built
+
+- Dashboard with curated market watchlist (add/remove via URL)
+- Market cards for both binary and multi-outcome event markets
+- Horizontal outcome bars with auto-shortened labels for events
+- Real-time pipeline progress stepper with SSE streaming
+- Add Market modal
+- Full API: `GET /api/markets`, `POST /api/markets`, `POST /api/analyze`, `GET /api/analyze/{id}/sse`, cancel endpoint
+
+### TODO
+
+- [ ] Integrate Claude Agent SDK into pipeline stages (currently stubbed with placeholders)
+- [ ] Full report view page (`app/report/[id]/page.tsx`) with structured sections (bull/bear, tail risks, methodology, etc.)
+- [ ] Report parsing endpoint — return structured JSON from saved markdown
+- [ ] History dropdown on completed cards (past reports per market)
+- [ ] Price caching (~60s) to avoid hammering Kalshi API on refresh
+- [ ] Concurrent analysis queue (currently one-at-a-time)
+
+### File structure
+
+```
+webapp/
+├── design.md              # architecture & design decisions
+├── mockups.md             # ASCII mockups of all views
+├── backend/
+│   ├── main.py            # FastAPI app + endpoints
+│   ├── pipeline.py        # agent orchestration + SSE events
+│   ├── models.py          # Pydantic schemas
+│   ├── config.py          # watchlist persistence
+│   └── requirements.txt
+└── frontend/
+    ├── app/
+    │   └── page.tsx        # dashboard
+    ├── components/
+    │   ├── MarketCard.tsx
+    │   ├── ProgressStepper.tsx
+    │   ├── OutcomeBar.tsx
+    │   └── AddMarketModal.tsx
+    └── lib/
+        ├── api.ts          # API client
+        ├── useAnalysis.ts  # SSE hook
+        └── types.ts        # TypeScript types
+```
+
 ## API keys
 
 | Key | Required | Source |
