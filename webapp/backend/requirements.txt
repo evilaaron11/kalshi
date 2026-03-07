@@ -1,7 +1,0 @@
-fastapi>=0.115.0
-uvicorn[standard]>=0.34.0
-pydantic>=2.0
-# inherited from root project
-requests
-python-dotenv
-cryptography

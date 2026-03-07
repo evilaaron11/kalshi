@@ -71,6 +71,7 @@ def parse_market(market: dict, ticker: str = "") -> dict:
         "ticker": market.get("ticker", ticker),
         "title": market.get("title", ""),
         "subtitle": market.get("subtitle", ""),
+        "yes_sub_title": market.get("yes_sub_title", ""),
         "resolution_criteria": (
             market.get("rules_primary", "") + "\n" + market.get("rules_secondary", "")
         ).strip(),
