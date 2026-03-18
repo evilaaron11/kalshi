@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ParsedReport, RankingEntry } from "@/lib/reportParser";
 import ReportSection from "./ReportSection";
 import RichText from "./RichText";
@@ -51,11 +51,48 @@ function absEdge(edge: string): number {
   return m ? parseFloat(m[1]) : 0;
 }
 
+function EdgeTooltip({ edge, reasoning }: { edge: string; reasoning: string }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const edgeColor = edge.startsWith("+") ? "text-green-400" :
+                    edge.startsWith("-") ? "text-red-400" : "text-neutral-500";
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => reasoning && setOpen(!open)}
+        className={`font-mono min-w-[3rem] text-right font-medium ${edgeColor} ${
+          reasoning ? "cursor-pointer hover:underline decoration-dotted underline-offset-2" : ""
+        }`}
+        title={reasoning ? "Click for explanation" : ""}
+      >
+        {edge}
+      </button>
+      {open && reasoning && (
+        <div className="absolute right-0 top-full mt-1 z-50 w-80 p-3
+          bg-neutral-800 border border-neutral-700 rounded-lg shadow-2xl">
+          <div className="text-xs text-neutral-500 uppercase tracking-wide mb-1.5">Why this edge</div>
+          <p className="text-sm text-neutral-300 leading-relaxed">
+            <RichText text={reasoning} />
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RankingRow({ r, highlight }: { r: RankingEntry; highlight?: boolean }) {
   const edgeText = r.edge.split("(")[0].trim() || "~0%";
-  const edgeColor = r.edge.startsWith("+") ? "text-green-400" :
-                    r.edge.startsWith("-") ? "text-red-400" :
-                    "text-neutral-500";
   return (
     <div className={`flex items-center gap-3 py-1.5 border-b border-neutral-800/50 last:border-0 ${
       highlight ? "bg-blue-500/5" : ""
@@ -73,9 +110,7 @@ function RankingRow({ r, highlight }: { r: RankingEntry; highlight?: boolean }) 
         <div className="text-right w-12">
           <span className="text-neutral-200">{r.estimate}</span>
         </div>
-        <span className={`font-mono min-w-[3rem] text-right font-medium ${edgeColor}`}>
-          {edgeText}
-        </span>
+        <EdgeTooltip edge={edgeText} reasoning={r.reasoning} />
       </div>
     </div>
   );

@@ -5,6 +5,7 @@ import type { MarketSummary } from "@/lib/types";
 import { useAnalysis } from "@/lib/useAnalysis";
 import MarketCard from "@/components/MarketCard";
 import AddMarketModal from "@/components/AddMarketModal";
+import ChatWidget from "@/components/ChatWidget";
 
 export default function Dashboard() {
   const [markets, setMarkets] = useState<MarketSummary[]>([]);
@@ -12,6 +13,7 @@ export default function Dashboard() {
   const [modalOpen, setModalOpen] = useState(false);
   const { runState, start, cancel, reset } = useAnalysis();
   const [activeTicker, setActiveTicker] = useState<string | null>(null);
+  const [viewingTicker, setViewingTicker] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -48,6 +50,9 @@ export default function Dashboard() {
     await start(ticker);
   };
 
+  // Track which market has its report open for the chatbot
+  const chatTicker = viewingTicker || activeTicker;
+
   return (
     <div className="min-h-screen">
       <header className="border-b border-neutral-800 px-6 py-4 flex items-center justify-between">
@@ -82,6 +87,7 @@ export default function Dashboard() {
             onAnalyze={() => handleAnalyze(m.ticker)}
             onCancel={cancel}
             onRemove={() => handleRemove(m.ticker)}
+            onReportToggle={(open) => setViewingTicker(open ? m.ticker : null)}
           />
         ))}
       </main>
@@ -91,6 +97,8 @@ export default function Dashboard() {
         onClose={() => setModalOpen(false)}
         onAdd={handleAdd}
       />
+
+      <ChatWidget ticker={chatTicker} />
     </div>
   );
 }

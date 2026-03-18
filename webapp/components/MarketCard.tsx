@@ -15,6 +15,7 @@ interface Props {
   onAnalyze: () => void;
   onCancel: () => void;
   onRemove: () => void;
+  onReportToggle?: (open: boolean) => void;
 }
 
 export default function MarketCard({
@@ -23,6 +24,7 @@ export default function MarketCard({
   onAnalyze,
   onCancel,
   onRemove,
+  onReportToggle,
 }: Props) {
   const isRunning =
     runState?.runId != null && !runState.complete && !runState.error;
@@ -69,10 +71,12 @@ export default function MarketCard({
   const handleViewReport = () => {
     if (reportOpen) {
       setReportOpen(false);
+      onReportToggle?.(false);
       return;
     }
     if (parsedReport) {
       setReportOpen(true);
+      onReportToggle?.(true);
       return;
     }
     // Shouldn't happen since we load on mount, but fallback
@@ -83,6 +87,7 @@ export default function MarketCard({
           const raw = await r.text();
           setParsedReport(parseReport(raw));
           setReportOpen(true);
+          onReportToggle?.(true);
         }
       })
       .finally(() => setLoadingReport(false));
