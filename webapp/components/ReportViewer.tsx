@@ -2,6 +2,8 @@
 
 import type { ParsedReport } from "@/lib/reportParser";
 import ReportSection from "./ReportSection";
+import RichText from "./RichText";
+import { parseBulletBlock } from "@/lib/richTextUtils";
 
 interface Props {
   report: ParsedReport;
@@ -41,11 +43,161 @@ function BulletList({ items, color }: { items: string[]; color: string }) {
       {items.map((item, i) => (
         <li key={i} className="flex items-start gap-2 text-sm">
           <span className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${color}`} />
-          <span className="text-neutral-300">{item}</span>
+          <RichText text={item} className="text-neutral-300" />
         </li>
       ))}
     </ul>
   );
+}
+
+/** Renders a block of text as structured rich bullets with markdown formatting */
+function RichBulletSection({ text, icon }: { text: string; icon?: string }) {
+  const items = parseBulletBlock(text);
+
+  if (items.length === 0) {
+    // Single paragraph, no bullets
+    return (
+      <p className="text-sm text-neutral-300 leading-relaxed">
+        <RichText text={text} />
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {items.map((item, i) => {
+        // Check if item has a bold label prefix like "**Name** (X%): description"
+        const labelMatch = item.match(/^\*\*(.+?)\*\*\s*(.*)$/s);
+
+        if (labelMatch) {
+          return (
+            <div key={i} className="flex items-start gap-2.5">
+              {icon && <span className="text-sm mt-0.5 flex-shrink-0">{icon}</span>}
+              <div>
+                <div className="text-sm font-semibold text-neutral-200">
+                  {labelMatch[1]}
+                </div>
+                <div className="text-sm text-neutral-400 leading-relaxed mt-0.5">
+                  <RichText text={labelMatch[2]} />
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div key={i} className="flex items-start gap-2.5">
+            {icon && <span className="text-sm mt-0.5 flex-shrink-0">{icon}</span>}
+            {!icon && <span className="mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 bg-neutral-600" />}
+            <p className="text-sm text-neutral-300 leading-relaxed">
+              <RichText text={item} />
+            </p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Renders a betting recommendation block */
+function BettingBlock({ text }: { text: string }) {
+  const items = parseBulletBlock(text);
+
+  // Try to find the main position line (starts with YES/NO or Buy/Sell)
+  const positionLine = items.find((l) =>
+    /^(YES|NO|Buy|Sell)\b/i.test(l) || /\$\d/.test(l),
+  );
+  const details = items.filter((l) => l !== positionLine);
+
+  return (
+    <div className="space-y-3">
+      {positionLine && (
+        <div className="bg-neutral-800/50 border border-neutral-700/50 rounded-lg p-3">
+          <p className="text-sm font-mono text-neutral-200 leading-relaxed">
+            <RichText text={positionLine} />
+          </p>
+        </div>
+      )}
+      {!positionLine && (
+        <div className="bg-neutral-800/50 border border-neutral-700/50 rounded-lg p-3">
+          <p className="text-sm text-neutral-300 leading-relaxed">
+            <RichText text={text.split("\n")[0]} />
+          </p>
+        </div>
+      )}
+      {details.length > 0 && (
+        <ul className="space-y-1.5 ml-1">
+          {details.map((item, i) => (
+            <li key={i} className="flex items-start gap-2 text-sm">
+              <span className="mt-1.5 w-1 h-1 rounded-full flex-shrink-0 bg-neutral-600" />
+              <span className="text-neutral-400">
+                <RichText text={item} />
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** Renders cross-market comparison — detects markdown tables or text */
+function CrossMarketBlock({ text }: { text: string }) {
+  // Check if it contains a markdown table
+  const lines = text.split("\n").filter((l) => l.trim());
+  const tableLines = lines.filter((l) => l.includes("|"));
+
+  if (tableLines.length >= 3) {
+    // Parse markdown table
+    const headerLine = tableLines[0];
+    const dataLines = tableLines.slice(2); // skip separator
+    const headers = headerLine
+      .split("|")
+      .map((h) => h.trim())
+      .filter(Boolean);
+
+    return (
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-neutral-700">
+              {headers.map((h, i) => (
+                <th
+                  key={i}
+                  className="px-3 py-2 text-left text-xs text-neutral-500 uppercase tracking-wide font-medium"
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {dataLines.map((line, ri) => {
+              const cells = line
+                .split("|")
+                .map((c) => c.trim())
+                .filter(Boolean);
+              return (
+                <tr
+                  key={ri}
+                  className="border-b border-neutral-800/50 hover:bg-neutral-800/30"
+                >
+                  {cells.map((cell, ci) => (
+                    <td key={ci} className="px-3 py-2 text-neutral-300">
+                      <RichText text={cell} />
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  // Fallback: render as rich text paragraphs
+  return <RichBulletSection text={text} />;
 }
 
 function PreBlock({ text }: { text: string }) {
@@ -82,7 +234,7 @@ export default function ReportViewer({ report }: Props) {
                 <div className="text-neutral-700 text-xl">/</div>
                 <div>
                   <div className="text-xl text-neutral-400 tabular-nums">
-                    {report.marketPrice || "—"}
+                    {report.marketPrice || "\u2014"}
                   </div>
                   <div className="text-xs text-neutral-500">Market</div>
                 </div>
@@ -113,7 +265,7 @@ export default function ReportViewer({ report }: Props) {
             )}
           </div>
 
-          {/* Confidence + Crux sidebar */}
+          {/* Confidence sidebar */}
           <div className="text-right space-y-2 flex-shrink-0">
             {report.confidence && <ConfidenceBadge level={report.confidence} />}
           </div>
@@ -122,7 +274,7 @@ export default function ReportViewer({ report }: Props) {
         {report.crux && (
           <div className="mt-3 pt-3 border-t border-neutral-800 text-sm text-neutral-400">
             <span className="text-neutral-600 text-xs uppercase tracking-wide">Crux: </span>
-            {report.crux}
+            <RichText text={report.crux} />
           </div>
         )}
       </div>
@@ -151,49 +303,50 @@ export default function ReportViewer({ report }: Props) {
 
       {/* === Betting Recommendation === */}
       {report.bettingRecommendation && (
-        <ReportSection title="Betting Recommendation" badge="$100">
-          <PreBlock text={report.bettingRecommendation} />
+        <ReportSection title="Betting Recommendation" badge="$100" badgeColor="bg-emerald-900/50">
+          <BettingBlock text={report.bettingRecommendation} />
         </ReportSection>
       )}
 
       {/* === Tail Risks === */}
       {report.tailRisks && (
         <ReportSection title="Tail Risks">
-          <PreBlock text={report.tailRisks} />
+          <RichBulletSection text={report.tailRisks} icon={"\u26A0\uFE0F"} />
         </ReportSection>
       )}
 
       {/* === Resolution Watch === */}
       {report.resolutionWatch && (
         <ReportSection title="Resolution Watch">
-          <PreBlock text={report.resolutionWatch} />
+          <RichBulletSection text={report.resolutionWatch} icon={"\uD83D\uDD0E"} />
         </ReportSection>
       )}
 
       {/* === Cross-Market === */}
       {report.crossMarket && (
         <ReportSection title="Cross-Market Comparison">
-          <PreBlock text={report.crossMarket} />
+          <CrossMarketBlock text={report.crossMarket} />
         </ReportSection>
       )}
 
       {/* === Key Sources === */}
       {report.keySources.length > 0 && (
         <ReportSection title="Key Sources" badge={`${report.keySources.length}`}>
-          <ul className="space-y-1">
+          <ul className="space-y-2">
             {report.keySources.map((s, i) => (
-              <li key={i} className="text-xs">
+              <li key={i} className="flex items-start gap-2">
+                <span className="text-neutral-600 mt-0.5 text-xs flex-shrink-0">{"\uD83D\uDCCE"}</span>
                 {s.url ? (
                   <a
                     href={s.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-blue-400 hover:text-blue-300 hover:underline"
+                    className="text-sm text-blue-400 hover:text-blue-300 underline decoration-blue-400/30 hover:decoration-blue-300/50"
                   >
-                    {s.title || s.url} &#8599;
+                    {s.title || s.url} {"\u2197"}
                   </a>
                 ) : (
-                  <span className="text-neutral-400">{s.title}</span>
+                  <span className="text-sm text-neutral-400">{s.title}</span>
                 )}
               </li>
             ))}
@@ -204,28 +357,30 @@ export default function ReportViewer({ report }: Props) {
       {/* === Methodology === */}
       {report.probabilityMethodology && (
         <ReportSection title="Probability Methodology" defaultOpen={false}>
-          <PreBlock text={report.probabilityMethodology} />
+          <RichBulletSection text={report.probabilityMethodology} />
         </ReportSection>
       )}
 
       {/* === Analyst Notes === */}
       {report.analystNotes && (
         <ReportSection title="Analyst Notes" defaultOpen={false}>
-          <p className="text-sm text-neutral-400">{report.analystNotes}</p>
+          <p className="text-sm text-neutral-400 leading-relaxed">
+            <RichText text={report.analystNotes} />
+          </p>
         </ReportSection>
       )}
 
       {/* === Dark Horse (events) === */}
       {report.darkHorse && (
         <ReportSection title="Dark Horse" defaultOpen={false}>
-          <PreBlock text={report.darkHorse} />
+          <RichBulletSection text={report.darkHorse} />
         </ReportSection>
       )}
 
       {/* === Delta Analysis === */}
       {report.deltaAnalysis && (
         <ReportSection title="Delta Analysis" badge="vs prior" badgeColor="bg-purple-900/50">
-          <PreBlock text={report.deltaAnalysis} />
+          <CrossMarketBlock text={report.deltaAnalysis} />
         </ReportSection>
       )}
 

@@ -202,6 +202,49 @@ describe("parseReport — event", () => {
   });
 });
 
+describe("parseReport — real format sections", () => {
+  const realTailRisks = `## Calibrator Report
+TAIL RISKS:
+1. **Stratospheric Aerosol Injection (SAI) deployment** (~2% probability): If wealthy nations deploy SAI by 2038–2042 to cap warming at 1.5–1.8°C, annual anomalies could be artificially suppressed below 2°C indefinitely.
+2. **Amazon tipping point + carbon feedback pulse** (~3% probability): Accelerated deforestation triggers Amazon savannification by 2035–2038, releasing a 50–100 GtCO₂ pulse.
+
+RESOLUTION WATCH:
+- **Critical ambiguity — "Source Agencies" undefined**: The contract never enumerates which agencies qualify.
+- **2049 report timing trap**: Year-2049 annual temperature reports won't publish until mid-January 2050.
+
+CROSS-MARKET COMPARISON:
+No cross-market matches found.
+
+BETTING RECOMMENDATION ($100 BANKROLL):
+**NO — $6 at 21 cents per contract (~29 contracts)**
+- True p(NO) ≈ 31% vs. market-implied p(NO) = 21%
+- Thesis: Inter-dataset divergence structurally raises the functional threshold
+
+PROBABILITY METHODOLOGY:
+Base rate anchor`;
+
+  const report = parseReport(realTailRisks);
+
+  it("parses tail risks with bold labels", () => {
+    expect(report.tailRisks).toContain("**Stratospheric Aerosol");
+    expect(report.tailRisks).toContain("**Amazon tipping point");
+  });
+
+  it("parses resolution watch bullets", () => {
+    expect(report.resolutionWatch).toContain("**Critical ambiguity");
+    expect(report.resolutionWatch).toContain("**2049 report timing");
+  });
+
+  it("parses cross-market even when no matches", () => {
+    expect(report.crossMarket).toContain("No cross-market matches");
+  });
+
+  it("parses betting recommendation with parenthetical bankroll label", () => {
+    expect(report.bettingRecommendation).toContain("NO");
+    expect(report.bettingRecommendation).toContain("21 cents");
+  });
+});
+
 describe("parseReport — edge cases", () => {
   it("handles empty/minimal input without crashing", () => {
     const report = parseReport("Some raw text with no structure");
