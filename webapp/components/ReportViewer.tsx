@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { ParsedReport, RankingEntry } from "@/lib/reportParser";
 import ReportSection from "./ReportSection";
 import RichText from "./RichText";
@@ -45,28 +45,36 @@ function EdgeDisplay({ edge, direction }: { edge: string; direction: string }) {
   );
 }
 
-function RankingRow({ r }: { r: RankingEntry }) {
-  // Parse edge direction from edge string
+/** Extract numeric edge value for sorting. Returns absolute value. */
+function absEdge(edge: string): number {
+  const m = edge.match(/[+-]?\s*~?(\d+(?:\.\d+)?)/);
+  return m ? parseFloat(m[1]) : 0;
+}
+
+function RankingRow({ r, highlight }: { r: RankingEntry; highlight?: boolean }) {
+  const edgeText = r.edge.split("(")[0].trim() || "~0%";
   const edgeColor = r.edge.startsWith("+") ? "text-green-400" :
                     r.edge.startsWith("-") ? "text-red-400" :
                     "text-neutral-500";
   return (
-    <div className="flex items-center gap-3 py-1.5 border-b border-neutral-800/50 last:border-0">
+    <div className={`flex items-center gap-3 py-1.5 border-b border-neutral-800/50 last:border-0 ${
+      highlight ? "bg-blue-500/5" : ""
+    } ${r.grouped ? "opacity-70" : ""}`}>
       <span className="text-neutral-600 text-xs w-5 text-right font-mono">#{r.rank}</span>
       <div className="flex-1 min-w-0">
-        <div className="text-sm text-neutral-200 truncate">{r.outcome}</div>
+        <div className={`text-sm truncate ${highlight ? "text-neutral-100 font-medium" : "text-neutral-300"}`}>
+          {r.outcome}
+        </div>
       </div>
       <div className="flex items-center gap-3 text-xs tabular-nums flex-shrink-0">
-        <div className="text-right">
-          <span className="text-neutral-500">Mkt </span>
-          <span className="text-neutral-300">{r.marketPrice}</span>
+        <div className="text-right w-12">
+          <span className="text-neutral-400">{r.marketPrice}</span>
         </div>
-        <div className="text-right">
-          <span className="text-neutral-500">Est </span>
-          <span className="text-neutral-200 font-medium">{r.estimate}</span>
+        <div className="text-right w-12">
+          <span className="text-neutral-200">{r.estimate}</span>
         </div>
-        <span className={`font-mono min-w-[3rem] text-right ${edgeColor}`}>
-          {r.edge.split("(")[0].trim() || "~0%"}
+        <span className={`font-mono min-w-[3rem] text-right font-medium ${edgeColor}`}>
+          {edgeText}
         </span>
       </div>
     </div>
@@ -204,11 +212,15 @@ function PreBlock({ text }: { text: string }) {
 
 export default function ReportViewer({ report }: Props) {
   const isEvent = report.rankings.length > 0;
-  const [rankingsCollapsed, setRankingsCollapsed] = useState(false);
+  const [showAllRankings, setShowAllRankings] = useState(false);
 
-  // For events with many outcomes, show all by default but allow collapsing
-  const COLLAPSE_THRESHOLD = 10;
-  const hasMany = report.rankings.length > COLLAPSE_THRESHOLD;
+  // Sort by absolute edge to find the most actionable outcomes
+  const TOP_COUNT = 5;
+  const topByEdge = useMemo(() => {
+    if (report.rankings.length <= TOP_COUNT) return null; // show all if few
+    const sorted = [...report.rankings].sort((a, b) => absEdge(b.edge) - absEdge(a.edge));
+    return new Set(sorted.slice(0, TOP_COUNT).map((r) => r.rank));
+  }, [report.rankings]);
 
   return (
     <div className="space-y-3">
@@ -255,32 +267,50 @@ export default function ReportViewer({ report }: Props) {
               <span className="w-5" />
               <span className="flex-1">Outcome</span>
               <div className="flex items-center gap-3 flex-shrink-0">
-                <span className="w-14 text-right">Market</span>
-                <span className="w-14 text-right">Estimate</span>
-                <span className="w-12 text-right">Edge</span>
+                <span className="w-12 text-right">Market</span>
+                <span className="w-12 text-right">Est</span>
+                <span className="min-w-[3rem] text-right">Edge</span>
               </div>
             </div>
-            <div className={hasMany && rankingsCollapsed ? "max-h-60 overflow-hidden relative" : ""}>
-              {report.rankings.map((r) => (
-                <RankingRow key={r.rank} r={r} />
-              ))}
-              {hasMany && rankingsCollapsed && (
-                <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-neutral-900 to-transparent" />
-              )}
-            </div>
-            {hasMany && (
-              <button
-                onClick={() => setRankingsCollapsed(!rankingsCollapsed)}
-                className="w-full text-center text-xs text-blue-400 hover:text-blue-300 py-2 mt-1 border-t border-neutral-800/50"
-              >
-                {rankingsCollapsed
-                  ? `Show all ${report.rankings.length} outcomes`
-                  : "Collapse rankings"}
-              </button>
+
+            {/* Top outcomes by edge (or all if <= TOP_COUNT) */}
+            {topByEdge
+              ? report.rankings
+                  .filter((r) => topByEdge.has(r.rank))
+                  .sort((a, b) => absEdge(b.edge) - absEdge(a.edge))
+                  .map((r) => (
+                    <RankingRow key={r.rank} r={r} highlight />
+                  ))
+              : report.rankings.map((r) => (
+                  <RankingRow key={r.rank} r={r} />
+                ))
+            }
+
+            {/* Expand to show all rankings in original order */}
+            {topByEdge && (
+              <>
+                {showAllRankings && (
+                  <div className="mt-2 pt-2 border-t border-neutral-800">
+                    <div className="text-xs text-neutral-600 mb-1">All outcomes (by rank)</div>
+                    {report.rankings.map((r) => (
+                      <RankingRow
+                        key={r.rank}
+                        r={r}
+                        highlight={topByEdge.has(r.rank)}
+                      />
+                    ))}
+                  </div>
+                )}
+                <button
+                  onClick={() => setShowAllRankings(!showAllRankings)}
+                  className="w-full text-center text-xs text-blue-400 hover:text-blue-300 py-2 mt-1 border-t border-neutral-800/50"
+                >
+                  {showAllRankings
+                    ? "Show top edges only"
+                    : `Show all ${report.rankings.length} outcomes`}
+                </button>
+              </>
             )}
-            <div className="text-xs text-neutral-600 mt-1 text-right">
-              {report.rankings.length} outcomes ranked
-            </div>
           </div>
         )}
 

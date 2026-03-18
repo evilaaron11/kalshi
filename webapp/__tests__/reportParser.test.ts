@@ -276,6 +276,64 @@ Base rate anchor`;
   });
 });
 
+describe("parseReport — grouped rankings", () => {
+  const reportWithGrouped = `## Calibrator Report
+RANKING:
+#1 MOST LIKELY: Alice
+   Market price: 50% | Your estimate: 60% | Edge: +10%
+   Why: Strong signals
+
+#2: Bob
+   Market price: 30% | Your estimate: 20% | Edge: -10%
+   Why: Weak signals
+
+#3-#6 (remaining outcomes — Charlie, Diana, Eve, Frank):
+   Market prices: 10–15% | Estimated range: 8–12% | Edges: -2% to -5%
+   Why: No specific signals
+
+DARK HORSE:
+None.
+
+## Evidence Agent
+Done.
+## Devil's Advocate
+Done.
+## Resolution Analysis
+Done.
+## Chaos Agent
+Done.`;
+
+  const report = parseReport(reportWithGrouped);
+
+  it("expands grouped range into individual entries", () => {
+    expect(report.rankings.length).toBe(6); // 1 + 1 + 4 expanded
+  });
+
+  it("preserves individual ranking fields", () => {
+    const alice = report.rankings.find((r) => r.outcome === "Alice");
+    expect(alice?.edge).toContain("+10%");
+    expect(alice?.marketPrice).toBe("50%");
+  });
+
+  it("expands named entries from grouped range", () => {
+    const charlie = report.rankings.find((r) => r.outcome === "Charlie");
+    expect(charlie).toBeDefined();
+    expect(charlie?.rank).toBe(3);
+
+    const frank = report.rankings.find((r) => r.outcome === "Frank");
+    expect(frank).toBeDefined();
+    expect(frank?.rank).toBe(6);
+  });
+
+  it("marks grouped entries", () => {
+    const charlie = report.rankings.find((r) => r.outcome === "Charlie");
+    expect(charlie?.grouped).toBe(true);
+
+    const alice = report.rankings.find((r) => r.outcome === "Alice");
+    expect(alice?.grouped).toBeFalsy();
+  });
+});
+
 describe("parseReport — source merging", () => {
   const reportWithSources = `# Analysis: Test
 Generated: 2026-01-01

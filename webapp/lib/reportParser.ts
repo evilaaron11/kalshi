@@ -15,6 +15,8 @@ export interface RankingEntry {
   estimate: string;
   edge: string;
   reasoning: string;
+  /** True if this entry was part of a grouped range like "#22-#35" */
+  grouped?: boolean;
 }
 
 export interface ParsedReport {
@@ -101,7 +103,8 @@ function extractTopLevelSection(text: string, header: string): string | null {
 }
 
 function extractLabelValue(text: string, label: string): string | null {
-  const regex = new RegExp(`${label}\\s*[:.]\\s*(.+?)(?:\\n|$)`, "i");
+  // Match "LABEL: value" stopping at pipe separators or end of line
+  const regex = new RegExp(`${label}\\s*[:.]\\s*([^|\\n]+)`, "i");
   const m = text.match(regex);
   return m ? m[1].trim() : null;
 }
@@ -185,6 +188,41 @@ function parseRankings(text: string): RankingEntry[] {
   for (const block of blocks) {
     const rankMatch = block.match(/#(\d+)/);
     if (!rankMatch) continue;
+
+    // Check if this is a grouped range like "#22-#35 (remaining outcomes — ...)"
+    const rangeMatch = block.match(/#(\d+)\s*[-–]\s*#(\d+)/);
+    if (rangeMatch) {
+      // Parse grouped/range ranking
+      const outcome = block.match(/#\d+\s*[-–]\s*#\d+\s*\(([^)]+)\)/)?.[1]?.trim() ||
+                      block.match(/#\d+\s*[-–]\s*#\d+[^:]*:\s*\n?\s*(.+)/)?.[1]?.trim() || "";
+      const mp = extractLabelValue(block, "Market prices?") || "";
+      const est = extractLabelValue(block, "Estimated range") || extractLabelValue(block, "Your estimate") || "";
+      const edge = extractLabelValue(block, "Edges?") || extractLabelValue(block, "Edge") || "";
+      const why = extractLabelValue(block, "Why") || "";
+
+      // Expand range into individual entries so the UI can sort/filter
+      const startRank = parseInt(rangeMatch[1]);
+      const endRank = parseInt(rangeMatch[2]);
+      // Try to extract individual names from the parenthetical
+      const namesMatch = block.match(/\((?:remaining outcomes?\s*[-–—]\s*)?([^)]+)\)/i);
+      const names = namesMatch
+        ? namesMatch[1].split(/,\s*/).map((n) => n.trim()).filter(Boolean)
+        : [];
+
+      for (let r = startRank; r <= endRank; r++) {
+        const idx = r - startRank;
+        entries.push({
+          rank: r,
+          outcome: names[idx] || `#${r}`,
+          marketPrice: mp,
+          estimate: est,
+          edge,
+          reasoning: why,
+          grouped: true,
+        } as RankingEntry);
+      }
+      continue;
+    }
 
     const rank = parseInt(rankMatch[1]);
     const outcomeMatch = block.match(/#\d+[^:]*:\s*(.+)/);
