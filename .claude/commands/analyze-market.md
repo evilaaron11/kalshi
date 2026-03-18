@@ -2,14 +2,15 @@ Analyze a Kalshi prediction market using the multi-agent research pipeline.
 
 The user has provided a Kalshi market URL as the argument to this command.
 
-**IMPORTANT:** Agent prompts are defined in `src/prompts.py`. Read that file first to understand the available prompt functions. Each stage below tells you which function to call and what arguments to pass. Interpolate the market data into the function arguments — the function returns the full prompt string.
+**IMPORTANT:** Agent prompts are defined in `webapp/lib/prompts.ts`. Read that file first to understand the available prompt functions. Each stage below tells you which function to call and what arguments to pass. Interpolate the market data into the function arguments — the function returns the full prompt string.
 
 ## Step 1 — Fetch Market Data
 
 Run the following command and parse the JSON output:
 ```
-python kalshi_client.py <URL>
+cd webapp && npx tsx -e "import { fetchMarket } from './lib/kalshi'; fetchMarket('TICKER').then(d => console.log(JSON.stringify(d, null, 2)))"
 ```
+Replace TICKER with the ticker parsed from the user's URL (last path segment, uppercased).
 
 If there is an error, stop and report it clearly.
 
@@ -23,8 +24,8 @@ Check the output for a `"type": "event"` field:
 
 ### Step 2 — Run Evidence Agent (model: haiku)
 
-Launch with the Task tool. Use the prompt from `src/prompts.py`:
-- Function: `evidence_binary(title, resolution_criteria, close_date, yes_price)`
+Launch with the Task tool. Use the prompt from `webapp/lib/prompts.ts`:
+- Function: `evidenceBinary(title, resolutionCriteria, closeDate, yesPrice)`
 
 Wait for Evidence Agent to complete before proceeding.
 
@@ -34,8 +35,8 @@ Parse the Evidence Agent output. Extract all lines from the `## SOURCES POOL` se
 
 ### Step 4 — Run Devil's Advocate (model: haiku)
 
-Launch with the Task tool. Use the prompt from `src/prompts.py`:
-- Function: `devils_advocate_binary(title, resolution_criteria, close_date, yes_price, evidence_output, sources_pool)`
+Launch with the Task tool. Use the prompt from `webapp/lib/prompts.ts`:
+- Function: `devilsAdvocateBinary(title, resolutionCriteria, closeDate, yesPrice, evidenceOutput, sourcesPool)`
 
 Wait for Devil's Advocate to complete before proceeding.
 
@@ -47,16 +48,16 @@ Append Devil's Advocate's `## ADDITIONAL SOURCES` to the sources pool.
 
 Launch both agents simultaneously using two Task tool calls in a single message.
 
-**Resolution Agent (model: sonnet)** — prompt from `src/prompts.py`:
-- Function: `resolution_binary(title, resolution_criteria, close_date, evidence_output, devils_advocate_output)`
+**Resolution Agent (model: sonnet)** — prompt from `webapp/lib/prompts.ts`:
+- Function: `resolutionBinary(title, resolutionCriteria, closeDate, evidenceOutput, devilsAdvocateOutput)`
 
-**Chaos Agent (model: haiku)** — prompt from `src/prompts.py`:
-- Function: `chaos_binary(title, resolution_criteria, close_date, yes_price, evidence_output, devils_advocate_output)`
+**Chaos Agent (model: haiku)** — prompt from `webapp/lib/prompts.ts`:
+- Function: `chaosBinary(title, resolutionCriteria, closeDate, yesPrice, evidenceOutput, devilsAdvocateOutput)`
 
 ### Step 7 — Run Calibrator (model: sonnet)
 
-Use the prompt from `src/prompts.py`:
-- Function: `calibrator_binary(title, resolution_criteria, close_date, yes_price, volume, evidence_output, devils_advocate_output, resolution_output, chaos_output)`
+Use the prompt from `webapp/lib/prompts.ts`:
+- Function: `calibratorBinary(title, resolutionCriteria, closeDate, yesPrice, volume, evidenceOutput, devilsAdvocateOutput, resolutionOutput, chaosOutput)`
 
 ### Step 8 — Save, Compare, and Display
 
@@ -101,8 +102,8 @@ Also format sub-threshold markets the same way (or "None" if empty).
 
 ### Step 2 — Run Evidence Agent (model: haiku)
 
-Launch with the Task tool. Use the prompt from `src/prompts.py`:
-- Function: `evidence_event(title, close_date, resolution_criteria, outcomes_text)`
+Launch with the Task tool. Use the prompt from `webapp/lib/prompts.ts`:
+- Function: `evidenceEvent(title, closeDate, resolutionCriteria, outcomesText)`
 
 Wait for Evidence Agent to complete.
 
@@ -112,8 +113,8 @@ Parse the `## SOURCES POOL` section from Evidence Agent output.
 
 ### Step 4 — Run Devil's Advocate (model: haiku)
 
-Use the prompt from `src/prompts.py`:
-- Function: `devils_advocate_event(title, close_date, outcomes_text, evidence_output, sources_pool)`
+Use the prompt from `webapp/lib/prompts.ts`:
+- Function: `devilsAdvocateEvent(title, closeDate, outcomesText, evidenceOutput, sourcesPool)`
 
 Wait for Devil's Advocate to complete.
 
@@ -125,16 +126,16 @@ Append Devil's Advocate's `## ADDITIONAL SOURCES` to the pool.
 
 Launch both agents simultaneously.
 
-**Resolution Agent (model: sonnet)** — prompt from `src/prompts.py`:
-- Function: `resolution_event(title, close_date, resolution_criteria, outcomes_text, evidence_output, devils_advocate_output)`
+**Resolution Agent (model: sonnet)** — prompt from `webapp/lib/prompts.ts`:
+- Function: `resolutionEvent(title, closeDate, resolutionCriteria, outcomesText, evidenceOutput, devilsAdvocateOutput)`
 
-**Chaos Agent (model: haiku)** — prompt from `src/prompts.py`:
-- Function: `chaos_event(title, close_date, outcomes_text, sub_text, evidence_output, devils_advocate_output)`
+**Chaos Agent (model: haiku)** — prompt from `webapp/lib/prompts.ts`:
+- Function: `chaosEvent(title, closeDate, outcomesText, subText, evidenceOutput, devilsAdvocateOutput)`
 
 ### Step 7 — Run Calibrator (model: sonnet)
 
-Use the prompt from `src/prompts.py`:
-- Function: `calibrator_event(title, close_date, outcomes_text, sub_text, volume, evidence_output, devils_advocate_output, resolution_output, chaos_output)`
+Use the prompt from `webapp/lib/prompts.ts`:
+- Function: `calibratorEvent(title, closeDate, outcomesText, subText, volume, evidenceOutput, devilsAdvocateOutput, resolutionOutput, chaosOutput)`
 
 ### Step 8 — Save, Compare, and Display
 

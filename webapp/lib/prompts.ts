@@ -3,27 +3,27 @@
 
 const FETCHER_DOCS = `AVAILABLE RESEARCH TOOLS (callable via Bash — use when clearly relevant):
 
-  python -m fetchers.whitehouse_fetch --search "<topic>" --type [eos|briefings|statements|all] --limit 5
+  cd webapp && npx tsx lib/fetchers/cli.ts whitehouse --search "<topic>" --type [eos|briefings|statements|all] --limit 5
   -> Full primary source text from whitehouse.gov: executive orders, proclamations, memoranda,
     press secretary briefing transcripts, and official statements.
   -> Use for: any market about presidential actions, executive orders, vetoes, pardons,
     nominations, tariffs, sanctions, or "will Trump do/sign/announce X" questions.
 
-  python -m fetchers.oira_agenda --search "<topic>" --source [fedreg|unified|both] --limit 10
+  cd webapp && npx tsx lib/fetchers/cli.ts oira --search "<topic>" --source [fedreg|unified|both] --limit 10
   -> Federal regulatory pipeline: recently published rules (Federal Register) and rules
     planned but not yet published (OIRA Unified Agenda).
   -> Use for: markets about agency rulemaking, regulatory deadlines, or "will X rule be finalized."
 
-  python -m fetchers.fec_fetch --candidate "<name>" [--office P|S|H] [--state XX] [--cycle YYYY]
-  python -m fetchers.fec_fetch --committee "<PAC name>"
+  cd webapp && npx tsx lib/fetchers/cli.ts fec --candidate "<name>" [--office P|S|H] [--state XX] [--cycle YYYY]
+  cd webapp && npx tsx lib/fetchers/cli.ts fec --committee "<PAC name>"
   -> FEC campaign finance: cash on hand, total raised, total spent, burn rate per candidate.
   -> Use for: any electoral market where fundraising signals likely matter (primaries especially).
 
-  python -m fetchers.polling_fetch --race "<state office year>" [--source wikipedia|rcp|both]
+  cd webapp && npx tsx lib/fetchers/cli.ts polling --race "<state office year>" [--source wikipedia|rcp|both]
   -> Polling averages from Wikipedia election articles and RealClearPolitics.
   -> Use for: electoral markets — who wins a race, margin questions, generic ballot.
 
-  python -m fetchers.cross_market --query "<market topic keywords>"
+  cd webapp && npx tsx lib/fetchers/cli.ts cross-market --query "<market topic keywords>"
   -> Cross-platform price comparison: searches Polymarket and Metaculus for matching markets.
   -> ALWAYS call this tool. Use 2-4 keywords from the market title as the query.
   -> Returns: platform, title, probability, volume/forecasters, URL for each match.

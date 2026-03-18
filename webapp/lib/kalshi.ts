@@ -52,9 +52,11 @@ function buildAuthHeaders(
 
 // --- Helpers ---
 
-function centsToProbability(val: number | undefined | null): number {
+/** Convert a dollar-string price (e.g. "0.6500") to a probability float. */
+function dollarsToProbability(val: unknown): number {
   if (val == null) return 0;
-  return Math.round((val / 100) * 10000) / 10000;
+  const n = typeof val === "string" ? parseFloat(val) : Number(val);
+  return isNaN(n) ? 0 : Math.round(n * 10000) / 10000;
 }
 
 /** Extract ticker from a Kalshi URL or return as-is if already a ticker. */
@@ -74,6 +76,22 @@ export function parseTicker(urlOrTicker: string): string {
 
 function parseMarketResponse(raw: Record<string, unknown>): ParsedMarket {
   const m = raw as Record<string, unknown>;
+
+  // New API uses *_dollars (string) fields; fall back to legacy cent integers
+  const price = (newKey: string, oldKey: string): number => {
+    if (newKey in m) return dollarsToProbability(m[newKey]);
+    const old = m[oldKey] as number | undefined;
+    return old != null ? Math.round((old / 100) * 10000) / 10000 : 0;
+  };
+
+  const numericField = (newKey: string, oldKey: string): number => {
+    if (newKey in m) {
+      const v = parseFloat(m[newKey] as string);
+      return isNaN(v) ? 0 : v;
+    }
+    return (m[oldKey] as number) || 0;
+  };
+
   return {
     ticker: (m.ticker as string) || "",
     title: (m.title as string) || "",
@@ -83,12 +101,12 @@ function parseMarketResponse(raw: Record<string, unknown>): ParsedMarket {
       .filter(Boolean)
       .join("\n\n"),
     eventTicker: (m.event_ticker as string) || "",
-    yesPrice: centsToProbability(m.yes_ask as number),
-    noPrice: centsToProbability(m.no_ask as number),
-    yesBid: centsToProbability(m.yes_bid as number),
-    volume: (m.volume as number) || 0,
-    openInterest: (m.open_interest as number) || 0,
-    closeDate: (m.close_date as string) || (m.expected_expiration_time as string) || "",
+    yesPrice: price("yes_ask_dollars", "yes_ask"),
+    noPrice: price("no_ask_dollars", "no_ask"),
+    yesBid: price("yes_bid_dollars", "yes_bid"),
+    volume: numericField("volume_fp", "volume"),
+    openInterest: numericField("open_interest_fp", "open_interest"),
+    closeDate: (m.close_time as string) || (m.expected_expiration_time as string) || "",
     status: (m.status as string) || "",
   };
 }

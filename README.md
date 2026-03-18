@@ -1,100 +1,156 @@
 # Kalshi Market Analyst
 
-A multi-agent pipeline for analyzing [Kalshi](https://kalshi.com) prediction markets. Fetches live market data, runs a sequential-then-parallel panel of Claude subagents that research from scratch and share a cumulative knowledge pool, then synthesizes a calibrated probability estimate with a betting recommendation.
+A multi-agent pipeline for analyzing [Kalshi](https://kalshi.com) prediction markets. Runs a panel of Claude subagents that research from scratch and share a cumulative knowledge pool, then synthesizes a calibrated probability estimate with a betting recommendation.
 
-## How it works
+Available as both a **web app** (Next.js dashboard with real-time SSE progress) and a **CLI skill** (`/analyze-market`).
+
+## Architecture
+
+```
+webapp/                          Unified Next.js 15 app (TypeScript)
+├── app/                         Pages & API routes
+│   ├── page.tsx                 Dashboard — watchlist with live prices
+│   └── api/
+│       ├── markets/             CRUD for watchlist + live Kalshi prices
+│       └── analyze/             Pipeline orchestration + SSE streaming
+├── components/                  React UI (MarketCard, ProgressStepper, etc.)
+├── lib/
+│   ├── kalshi.ts                Kalshi API client (RSA-signed auth)
+│   ├── pipeline.ts              Multi-agent orchestration (spawns Claude CLI)
+│   ├── prompts.ts               All agent prompt templates
+│   ├── fetchers/                Primary-source data fetchers
+│   │   ├── cli.ts               CLI entry point (agents call via Bash)
+│   │   ├── crossMarket.ts       Polymarket + Metaculus price comparison
+│   │   ├── fec.ts               FEC campaign finance data
+│   │   ├── oira.ts              Federal Register + OIRA regulatory pipeline
+│   │   ├── polling.ts           Wikipedia + RCP polling averages
+│   │   └── whitehouse.ts        White House executive actions & briefings
+│   ├── config.ts                API endpoints, timeouts, constants
+│   ├── httpClient.ts            Shared fetch wrapper
+│   ├── textUtils.ts             HTML stripping, fuzzy matching
+│   ├── types.ts                 TypeScript type definitions
+│   ├── useAnalysis.ts           React hook for SSE pipeline progress
+│   └── watchlist.ts             Watchlist persistence (JSON file)
+├── __tests__/                   Vitest test suite
+├── data/watchlist.json          Saved watchlist tickers
+└── results/                     Saved analysis reports (markdown)
+```
+
+## Pipeline
 
 ```
 /analyze-market <url>
       │
-      └── kalshi_client.py   →  fetch live market data + prices
+      └── kalshi.ts   →  fetch live market data + prices
             │
             ▼
       Phase 1 — Sequential Research
       │
-      ├── Evidence Agent (haiku)       max 7 searches, builds sources pool
-      │         │                      + whitehouse_fetch.py / oira_agenda.py
-      │         ▼
-      └── Devil's Advocate (haiku)     max 5 searches, extends sources pool
-            │                          + whitehouse_fetch.py / oira_agenda.py
-            ▼
-      Phase 2 — Sequential Analysis
-      │
-      ├── Resolution Agent (sonnet)    criteria & edge cases (max 1 search)
+      ├── Evidence Agent (haiku)       max 7 web searches + fetcher tools
       │         │
       │         ▼
+      └── Devil's Advocate (haiku)     max 5 searches, extends sources pool
+            │
+            ▼
+      Phase 2 — Parallel Analysis
+      │
+      ├── Resolution Agent (sonnet)    criteria & edge cases (max 1 search)
+      │
       └── Chaos Agent (haiku)          tail risks 1–8% (max 1 search)
             │
             ▼
       Calibrator (sonnet)  →  final report + edge + bet sizing
 ```
 
-Supports both **single binary markets** and **multi-outcome events** (e.g. "Who will be Fed Chair?", "When will X happen?").
+Supports both **single binary markets** and **multi-outcome events**.
 
 ## Research Tools
 
-Research agents have access to specialized primary-source fetchers alongside web search. These do not count against the agents' search limits.
+Agents have access to specialized fetchers alongside web search. These don't count against search limits.
 
-| Script | What it fetches | When agents use it |
+| Fetcher | Data Source | Use Case |
 |---|---|---|
-| `whitehouse_fetch.py` | Full text of executive orders, proclamations, press briefings, and statements from whitehouse.gov | Presidential actions, EOs, tariffs, nominations, pardons — any "will Trump do/sign X" market |
-| `oira_agenda.py` | Federal Register published rules + OIRA Unified Agenda (forward-looking pipeline) | Agency rulemaking, regulatory deadlines, "will X rule be finalized" markets |
-| `fec_fetch.py` | FEC campaign finance: cash on hand, total raised/spent, burn rate | Election markets — fundraising as a leading predictor |
-| `polling_fetch.py` | Polling averages from Wikipedia and RealClearPolitics | Electoral race markets |
+| `whitehouse` | Executive orders, briefings, statements from whitehouse.gov | Presidential actions, EOs, tariffs, nominations |
+| `oira` | Federal Register + OIRA Unified Agenda | Agency rulemaking, regulatory deadlines |
+| `fec` | FEC campaign finance (cash on hand, raised/spent, burn rate) | Election markets |
+| `polling` | Wikipedia + RealClearPolitics polling averages | Electoral race markets |
+| `cross-market` | Polymarket + Metaculus prices | Cross-platform arbitrage detection |
+
+Run fetchers directly:
+
+```bash
+cd webapp
+npx tsx lib/fetchers/cli.ts cross-market --query "government shutdown"
+npx tsx lib/fetchers/cli.ts whitehouse --search "tariffs" --type eos --limit 5
+npx tsx lib/fetchers/cli.ts oira --search "EPA climate" --source fedreg
+npx tsx lib/fetchers/cli.ts fec --candidate "Jon Ossoff" --office S --state GA
+npx tsx lib/fetchers/cli.ts polling --race "Georgia Senate 2026"
+```
 
 ## Setup
 
-**Requirements:** Python 3.10+, a Kalshi API key, [Claude Code](https://claude.ai/code) (Claude Pro).
+**Requirements:** Node.js 20+, [Claude Code](https://claude.ai/code) (Claude Pro/Max).
 
 ```bash
-pip install requests feedparser python-dotenv cryptography beautifulsoup4
+cd webapp
+npm install
 ```
 
-Create a `.env` file:
+Create `webapp/.env.local`:
 
 ```
-KALSHI_API_KEY=your_api_key_here
-KALSHI_PRIVATE_KEY_PATH=./kalshi_private.pem
+KALSHI_API_KEY=your_api_key
+KALSHI_PRIVATE_KEY_PATH=../kalshi_private.pem
 ```
 
 Place your Kalshi RSA private key at the path specified above.
 
 ## Usage
 
-Run from Claude Code inside this project directory:
+### Web App
+
+```bash
+cd webapp
+npm run dev
+```
+
+Open `http://localhost:3000`. Add markets to the watchlist, view live prices, and run the full analysis pipeline with real-time progress.
+
+### CLI
+
+From Claude Code inside the project directory:
 
 ```
 /analyze-market https://kalshi.com/markets/SOMEEVENT-TICKER
 ```
 
-Or with just the ticker:
-
-```
-/analyze-market SOMEEVENT-TICKER
-```
-
-You can also run the fetchers directly:
+### Tests
 
 ```bash
-# Market data
-python kalshi_client.py https://kalshi.com/markets/SOMEEVENT-TICKER
-
-# White House primary sources
-python whitehouse_fetch.py --search "tariffs" --type eos --limit 5
-python whitehouse_fetch.py --search "Ukraine ceasefire" --type briefings
-
-# Federal regulatory pipeline
-python oira_agenda.py --search "DOGE federal workforce" --agency OPM
-python oira_agenda.py --search "EPA climate" --source fedreg --limit 10
-
-# FEC campaign finance
-python fec_fetch.py --candidate "Jon Ossoff" --office S --state GA --cycle 2026
-python fec_fetch.py --committee "Save America" --limit 5
-
-# Polling averages
-python polling_fetch.py --race "Georgia Senate 2026"
-python polling_fetch.py --source rcp
+cd webapp
+npm test
 ```
+
+## API Routes
+
+| Method | Route | Description |
+|---|---|---|
+| `GET` | `/api/markets` | Watchlist with live Kalshi prices |
+| `POST` | `/api/markets` | Add ticker to watchlist |
+| `DELETE` | `/api/markets/[ticker]` | Remove ticker |
+| `GET` | `/api/markets/[ticker]/report` | Latest saved report |
+| `POST` | `/api/analyze` | Start pipeline run, returns `runId` |
+| `GET` | `/api/analyze/[runId]/sse` | SSE stream of pipeline events |
+| `GET` | `/api/analyze/[runId]/report` | Completed report markdown |
+| `POST` | `/api/analyze/[runId]/cancel` | Cancel running analysis |
+
+## API Keys
+
+| Key | Required | Source |
+|---|---|---|
+| `KALSHI_API_KEY` + RSA private key | Yes | [Kalshi API settings](https://kalshi.com/profile/api) |
+| `FEC_API_KEY` | Optional | [api.open.fec.gov](https://api.open.fec.gov) — uses `DEMO_KEY` without it |
+| `METACULUS_TOKEN` | Optional | Enables Metaculus cross-market comparison |
 
 ## Output
 
@@ -104,76 +160,8 @@ The Calibrator produces a structured report including:
 - Bull case / Bear case
 - Tail risks worth monitoring
 - Resolution watch (technical flags)
-- Betting recommendation with Kelly-sized position sizing
+- Betting recommendation with Half-Kelly sizing
+- Cross-market price comparison
 - Full probability methodology
 
-Results are saved to `results/YYYY-MM-DD_{TICKER}.md`.
-
-## Web App (in progress)
-
-A locally hosted web UI for the analysis pipeline. Lives on the `webapp` branch under `webapp/`.
-
-**Stack:** Next.js (React/TypeScript/Tailwind) frontend + FastAPI (Python) backend, connected via SSE for real-time pipeline progress.
-
-### Running locally
-
-```bash
-# Backend (from repo root)
-python -m uvicorn webapp.backend.main:app --reload --port 8000
-
-# Frontend (separate terminal)
-cd webapp/frontend; npm run dev
-```
-
-Frontend at `http://localhost:3000`, backend at `http://localhost:8000`.
-
-### What's built
-
-- Dashboard with curated market watchlist (add/remove via URL)
-- Market cards for both binary and multi-outcome event markets
-- Horizontal outcome bars with auto-shortened labels for events
-- Real-time pipeline progress stepper with SSE streaming
-- Add Market modal
-- Full API: `GET /api/markets`, `POST /api/markets`, `POST /api/analyze`, `GET /api/analyze/{id}/sse`, cancel endpoint
-
-### TODO
-
-- [ ] Integrate Claude Agent SDK into pipeline stages (currently stubbed with placeholders)
-- [ ] Full report view page (`app/report/[id]/page.tsx`) with structured sections (bull/bear, tail risks, methodology, etc.)
-- [ ] Report parsing endpoint — return structured JSON from saved markdown
-- [ ] History dropdown on completed cards (past reports per market)
-- [ ] Price caching (~60s) to avoid hammering Kalshi API on refresh
-- [ ] Concurrent analysis queue (currently one-at-a-time)
-
-### File structure
-
-```
-webapp/
-├── design.md              # architecture & design decisions
-├── mockups.md             # ASCII mockups of all views
-├── backend/
-│   ├── main.py            # FastAPI app + endpoints
-│   ├── pipeline.py        # agent orchestration + SSE events
-│   ├── models.py          # Pydantic schemas
-│   ├── config.py          # watchlist persistence
-│   └── requirements.txt
-└── frontend/
-    ├── app/
-    │   └── page.tsx        # dashboard
-    ├── components/
-    │   ├── MarketCard.tsx
-    │   ├── ProgressStepper.tsx
-    │   ├── OutcomeBar.tsx
-    │   └── AddMarketModal.tsx
-    └── lib/
-        ├── api.ts          # API client
-        ├── useAnalysis.ts  # SSE hook
-        └── types.ts        # TypeScript types
-```
-
-## API keys
-
-| Key | Required | Source |
-|---|---|---|
-| `KALSHI_API_KEY` + RSA private key | Yes | [Kalshi API settings](https://kalshi.com/profile/api) |
-| `FEC_API_KEY` | Optional | [api.open.fec.gov](https://api.open.fec.gov) — higher rate limits for `fec_fetch.py`; uses `DEMO_KEY` (1000 req/hour) without it |
+Reports are saved to `results/YYYY-MM-DD_HHMM_{TICKER}.md`.

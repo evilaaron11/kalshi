@@ -1,5 +1,0 @@
-requests
-feedparser
-python-dotenv
-cryptography
-beautifulsoup4
