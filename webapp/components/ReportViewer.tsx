@@ -1,26 +1,13 @@
 "use client";
 
-import type { ParsedReport } from "@/lib/reportParser";
+import { useState } from "react";
+import type { ParsedReport, RankingEntry } from "@/lib/reportParser";
 import ReportSection from "./ReportSection";
 import RichText from "./RichText";
 import { parseBulletBlock } from "@/lib/richTextUtils";
 
 interface Props {
   report: ParsedReport;
-}
-
-function EdgeBadge({ edge, direction }: { edge: string; direction: string }) {
-  const colors =
-    direction === "yes"
-      ? "bg-green-900/50 text-green-400 border-green-700/50"
-      : direction === "no"
-        ? "bg-red-900/50 text-red-400 border-red-700/50"
-        : "bg-neutral-800 text-neutral-400 border-neutral-700";
-  return (
-    <span className={`px-2 py-0.5 rounded border text-xs font-mono ${colors}`}>
-      {edge}
-    </span>
-  );
 }
 
 function ConfidenceBadge({ level }: { level: string }) {
@@ -34,6 +21,55 @@ function ConfidenceBadge({ level }: { level: string }) {
     <span className={`px-2 py-0.5 rounded text-xs uppercase ${colors}`}>
       {level}
     </span>
+  );
+}
+
+function EdgeDisplay({ edge, direction }: { edge: string; direction: string }) {
+  // Extract just the percentage part (e.g. "+7%" from "+7% -> lean YES")
+  const pctMatch = edge.match(/^([+-]?\~?\d+%?)/);
+  const pct = pctMatch ? pctMatch[1] : edge.split("->")[0].trim();
+  const label = edge.includes("lean YES") ? "lean YES" :
+                edge.includes("lean NO") ? "lean NO" : "";
+  const color = direction === "yes" ? "text-green-400" :
+                direction === "no" ? "text-red-400" : "text-neutral-400";
+  const bgColor = direction === "yes" ? "bg-green-500/10 border-green-500/20" :
+                  direction === "no" ? "bg-red-500/10 border-red-500/20" :
+                  "bg-neutral-800 border-neutral-700";
+
+  return (
+    <div className={`rounded-lg border px-3 py-2 ${bgColor}`}>
+      <div className={`text-lg font-bold tabular-nums ${color}`}>{pct}</div>
+      {label && <div className={`text-xs ${color} opacity-75`}>{label}</div>}
+      <div className="text-xs text-neutral-500">Edge</div>
+    </div>
+  );
+}
+
+function RankingRow({ r }: { r: RankingEntry }) {
+  // Parse edge direction from edge string
+  const edgeColor = r.edge.startsWith("+") ? "text-green-400" :
+                    r.edge.startsWith("-") ? "text-red-400" :
+                    "text-neutral-500";
+  return (
+    <div className="flex items-center gap-3 py-1.5 border-b border-neutral-800/50 last:border-0">
+      <span className="text-neutral-600 text-xs w-5 text-right font-mono">#{r.rank}</span>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm text-neutral-200 truncate">{r.outcome}</div>
+      </div>
+      <div className="flex items-center gap-3 text-xs tabular-nums flex-shrink-0">
+        <div className="text-right">
+          <span className="text-neutral-500">Mkt </span>
+          <span className="text-neutral-300">{r.marketPrice}</span>
+        </div>
+        <div className="text-right">
+          <span className="text-neutral-500">Est </span>
+          <span className="text-neutral-200 font-medium">{r.estimate}</span>
+        </div>
+        <span className={`font-mono min-w-[3rem] text-right ${edgeColor}`}>
+          {r.edge.split("(")[0].trim() || "~0%"}
+        </span>
+      </div>
+    </div>
   );
 }
 
@@ -168,71 +204,91 @@ function PreBlock({ text }: { text: string }) {
 
 export default function ReportViewer({ report }: Props) {
   const isEvent = report.rankings.length > 0;
+  const [showAllRankings, setShowAllRankings] = useState(false);
+
+  // For events, show top 5 in header, rest in expandable
+  const INITIAL_RANKINGS = 5;
+  const topRankings = report.rankings.slice(0, INITIAL_RANKINGS);
+  const remainingRankings = report.rankings.slice(INITIAL_RANKINGS);
 
   return (
     <div className="space-y-3">
       {/* === Verdict Header === */}
       <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex-1">
-            <div className="text-xs text-neutral-500 mb-1">
-              {report.closeDate && `Closes: ${report.closeDate}`}
-              {report.volume && ` \u00B7 Volume: ${report.volume}`}
-            </div>
-
-            {/* Binary verdict */}
-            {!isEvent && report.estimatedProbability && (
-              <div className="flex items-baseline gap-4 mt-2">
-                <div>
-                  <div className="text-3xl font-bold text-neutral-100 tabular-nums">
-                    {report.estimatedProbability}
-                  </div>
-                  <div className="text-xs text-neutral-500">Estimated</div>
-                </div>
-                <div className="text-neutral-700 text-xl">/</div>
-                <div>
-                  <div className="text-xl text-neutral-400 tabular-nums">
-                    {report.marketPrice || "\u2014"}
-                  </div>
-                  <div className="text-xs text-neutral-500">Market</div>
-                </div>
-                {report.edge && (
-                  <div className="ml-2">
-                    <EdgeBadge edge={report.edge} direction={report.edgeDirection} />
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Event rankings */}
-            {isEvent && (
-              <div className="mt-2 space-y-2">
-                {report.rankings.map((r) => (
-                  <div key={r.rank} className="flex items-center gap-3">
-                    <span className="text-neutral-600 text-sm w-6 text-right">#{r.rank}</span>
-                    <div className="flex-1">
-                      <div className="text-sm text-neutral-200 font-medium">{r.outcome}</div>
-                      <div className="text-xs text-neutral-500">
-                        Market: {r.marketPrice} \u00B7 Est: {r.estimate}
-                        {r.edge && <> \u00B7 Edge: {r.edge}</>}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+        {/* Meta line */}
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-xs text-neutral-500">
+            {report.closeDate && `Closes: ${report.closeDate}`}
+            {report.volume && ` \u00B7 Volume: ${report.volume}`}
           </div>
-
-          {/* Confidence sidebar */}
-          <div className="text-right space-y-2 flex-shrink-0">
-            {report.confidence && <ConfidenceBadge level={report.confidence} />}
-          </div>
+          {report.confidence && <ConfidenceBadge level={report.confidence} />}
         </div>
 
+        {/* Binary verdict */}
+        {!isEvent && report.estimatedProbability && (
+          <div className="flex items-center gap-4">
+            <div className="flex items-baseline gap-4">
+              <div>
+                <div className="text-3xl font-bold text-neutral-100 tabular-nums">
+                  {report.estimatedProbability}
+                </div>
+                <div className="text-xs text-neutral-500">Estimated</div>
+              </div>
+              <div className="text-neutral-700 text-xl">/</div>
+              <div>
+                <div className="text-xl text-neutral-400 tabular-nums">
+                  {report.marketPrice || "\u2014"}
+                </div>
+                <div className="text-xs text-neutral-500">Market</div>
+              </div>
+            </div>
+            {report.edge && (
+              <EdgeDisplay edge={report.edge} direction={report.edgeDirection} />
+            )}
+          </div>
+        )}
+
+        {/* Event rankings */}
+        {isEvent && (
+          <div>
+            {/* Column headers */}
+            <div className="flex items-center gap-3 pb-1.5 mb-1 border-b border-neutral-700 text-xs text-neutral-600">
+              <span className="w-5" />
+              <span className="flex-1">Outcome</span>
+              <div className="flex items-center gap-3 flex-shrink-0">
+                <span className="w-14 text-right">Market</span>
+                <span className="w-14 text-right">Estimate</span>
+                <span className="w-12 text-right">Edge</span>
+              </div>
+            </div>
+            {topRankings.map((r) => (
+              <RankingRow key={r.rank} r={r} />
+            ))}
+            {remainingRankings.length > 0 && (
+              <>
+                {showAllRankings && remainingRankings.map((r) => (
+                  <RankingRow key={r.rank} r={r} />
+                ))}
+                <button
+                  onClick={() => setShowAllRankings(!showAllRankings)}
+                  className="w-full text-center text-xs text-neutral-500 hover:text-neutral-300 py-2 mt-1 border-t border-neutral-800/50"
+                >
+                  {showAllRankings
+                    ? "Show less"
+                    : `Show all ${report.rankings.length} outcomes (+${remainingRankings.length} more)`}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Crux */}
         {report.crux && (
-          <div className="mt-3 pt-3 border-t border-neutral-800 text-sm text-neutral-400">
-            <span className="text-neutral-600 text-xs uppercase tracking-wide">Crux: </span>
-            <RichText text={report.crux} />
+          <div className="mt-3 pt-3 border-t border-neutral-800">
+            <div className="text-xs text-neutral-600 uppercase tracking-wide mb-1">Crux</div>
+            <p className="text-sm text-neutral-300 leading-relaxed">
+              <RichText text={report.crux} />
+            </p>
           </div>
         )}
       </div>

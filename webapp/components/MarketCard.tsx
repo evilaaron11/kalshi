@@ -38,20 +38,35 @@ export default function MarketCard({
   const titleSlug = slugify(market.eventTitle || market.title);
   const kalshiUrl = `https://kalshi.com/markets/${seriesLower}/${titleSlug}`;
 
-  // Check if a report exists on disk for this ticker
+  // Load report metadata on mount (for showing estimate inline)
   useEffect(() => {
-    fetch(`/api/markets/${market.ticker}/report`, { method: "HEAD" }).then(
-      (r) => setHasReport(r.ok),
-      () => {},
-    );
+    fetch(`/api/markets/${market.ticker}/report`)
+      .then(async (r) => {
+        if (r.ok) {
+          setHasReport(true);
+          const raw = await r.text();
+          setParsedReport(parseReport(raw));
+        }
+      })
+      .catch(() => {});
   }, [market.ticker]);
 
-  // Mark report available when current run completes
+  // Parse and show report when current run completes
   useEffect(() => {
-    if (isComplete) setHasReport(true);
-  }, [isComplete]);
+    if (isComplete && runState?.runId) {
+      setHasReport(true);
+      fetch(`/api/analyze/${runState.runId}/report`)
+        .then(async (r) => {
+          if (r.ok) {
+            const raw = await r.text();
+            setParsedReport(parseReport(raw));
+          }
+        })
+        .catch(() => {});
+    }
+  }, [isComplete, runState?.runId]);
 
-  const handleViewReport = async () => {
+  const handleViewReport = () => {
     if (reportOpen) {
       setReportOpen(false);
       return;
@@ -60,30 +75,28 @@ export default function MarketCard({
       setReportOpen(true);
       return;
     }
+    // Shouldn't happen since we load on mount, but fallback
     setLoadingReport(true);
-    try {
-      // Try current run first, fall back to latest on disk
-      let resp: Response | null = null;
-      if (runState?.runId) {
-        resp = await fetch(`/api/analyze/${runState.runId}/report`);
-      }
-      if (!resp?.ok) {
-        resp = await fetch(`/api/markets/${market.ticker}/report`);
-      }
-      if (resp.ok) {
-        const raw = await resp.text();
-        setParsedReport(parseReport(raw));
-        setReportOpen(true);
-      }
-    } finally {
-      setLoadingReport(false);
-    }
+    fetch(`/api/markets/${market.ticker}/report`)
+      .then(async (r) => {
+        if (r.ok) {
+          const raw = await r.text();
+          setParsedReport(parseReport(raw));
+          setReportOpen(true);
+        }
+      })
+      .finally(() => setLoadingReport(false));
   };
 
   const typeLabel =
     market.marketType === "event"
       ? `EVENT \u00B7 ${market.outcomes?.length || 0} outcomes`
       : "BINARY";
+
+  // Extract estimate for inline display
+  const estimate = parsedReport?.estimatedProbability;
+  const edge = parsedReport?.edge;
+  const edgeDir = parsedReport?.edgeDirection;
 
   return (
     <div
@@ -115,14 +128,31 @@ export default function MarketCard({
           </a>
         </div>
         {market.marketType === "binary" && (
-          <div className="text-right text-sm tabular-nums whitespace-nowrap">
-            <span className="text-green-400">
-              YES {((market.yesPrice || 0) * 100).toFixed(0)}{"\u00A2"}
-            </span>
-            <span className="text-neutral-600 mx-1">|</span>
-            <span className="text-red-400">
-              NO {((market.noPrice || 0) * 100).toFixed(0)}{"\u00A2"}
-            </span>
+          <div className="text-right text-sm tabular-nums whitespace-nowrap space-y-0.5">
+            <div>
+              <span className="text-green-400">
+                YES {((market.yesPrice || 0) * 100).toFixed(0)}{"\u00A2"}
+              </span>
+              <span className="text-neutral-600 mx-1">|</span>
+              <span className="text-red-400">
+                NO {((market.noPrice || 0) * 100).toFixed(0)}{"\u00A2"}
+              </span>
+            </div>
+            {/* Show estimate vs market when report exists */}
+            {estimate && edge && (
+              <div className="text-xs">
+                <span className="text-neutral-500">Est: </span>
+                <span className="text-neutral-300 font-medium">{estimate}</span>
+                <span className="mx-1 text-neutral-700">|</span>
+                <span className={
+                  edgeDir === "yes" ? "text-green-400" :
+                  edgeDir === "no" ? "text-red-400" :
+                  "text-neutral-500"
+                }>
+                  {edge.split("->")[0].trim()}
+                </span>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -176,7 +206,7 @@ export default function MarketCard({
 
       {/* Report viewer */}
       {reportOpen && parsedReport && (
-        <div className="mb-3 max-h-[700px] overflow-y-auto">
+        <div className="mb-3">
           <ReportViewer report={parsedReport} />
         </div>
       )}
