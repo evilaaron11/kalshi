@@ -50,11 +50,25 @@ Base rate of government shutdowns when CR expires: ~40%. Adjusted upward to 72% 
 ## Evidence Agent
 Evidence gathered from 7 web searches. Key findings include congressional deadlock and no CR text introduced.
 
+## FACTUAL SUMMARY
+
+**Budget Status**
+- No continuing resolution introduced as of March 2026 (Source: CBO, 2026-03-15)
+- Both chambers remain in session through deadline (Source: Congress.gov)
+
 ## SOURCES POOL
-- [CBO Report] | [https://cbo.gov/report]
+- [CBO Budget Analysis](https://cbo.gov/report)
+- [Reuters: Shutdown talks stall](https://reuters.com/politics/shutdown-2026)
+- [Congressional Budget Office](https://cbo.gov/shutdown-analysis)
 
 ## Devil's Advocate
+
+## COUNTERARGUMENTS
+
 Counter-arguments: historical precedent strongly favors last-minute deals (80% of shutdown threats resolve).
+
+## ADDITIONAL SOURCES
+- [Historical shutdown data](https://history.gov/shutdowns)
 
 ## Resolution Analysis
 Resolution is clear: lapse in appropriations at midnight. No ambiguity in criteria.
@@ -63,6 +77,9 @@ Resolution is clear: lapse in appropriations at midnight. No ambiguity in criter
 Scenarios:
 1. "Presidential Emergency" - executive action bypasses Congress (2% probability)
 2. "Discharge Petition Surprise" - moderate coalition forces vote (4% probability)
+
+## Tail Risk Details
+More details about each scenario and their potential impacts.
 `;
 
 const SAMPLE_EVENT_REPORT = `# Analysis: Who will be the next Fed Chair?
@@ -154,20 +171,34 @@ describe("parseReport — binary", () => {
     expect(report.bullCase[0]).toContain("continuing resolution");
   });
 
-  it("parses key sources", () => {
-    expect(report.keySources.length).toBe(2);
-    expect(report.keySources[0].url).toContain("cbo.gov");
+  it("parses key sources with merged URLs from evidence pool", () => {
+    // KEY SOURCES in calibrator have URLs, plus SOURCES POOL from evidence agent
+    expect(report.keySources.length).toBeGreaterThanOrEqual(2);
+    // Should have clickable URLs from either KEY SOURCES or SOURCES POOL
+    const withUrls = report.keySources.filter((s) => s.url);
+    expect(withUrls.length).toBeGreaterThan(0);
   });
 
   it("parses tail risks", () => {
     expect(report.tailRisks).toContain("Emergency presidential");
   });
 
-  it("parses sub-agent sections", () => {
+  it("parses full sub-agent sections including sub-headers", () => {
+    // Evidence agent should include sub-headers like ## FACTUAL SUMMARY and ## SOURCES POOL
     expect(report.evidenceAgent).toContain("7 web searches");
+    expect(report.evidenceAgent).toContain("FACTUAL SUMMARY");
+    expect(report.evidenceAgent).toContain("SOURCES POOL");
+    expect(report.evidenceAgent).toContain("cbo.gov");
+
+    // Devil's Advocate should include ## COUNTERARGUMENTS sub-header
     expect(report.devilsAdvocate).toContain("historical precedent");
+    expect(report.devilsAdvocate).toContain("COUNTERARGUMENTS");
+
     expect(report.resolutionAnalysis).toContain("lapse in appropriations");
+
+    // Chaos agent should include ## Tail Risk Details sub-header
     expect(report.chaosAgent).toContain("Discharge Petition");
+    expect(report.chaosAgent).toContain("Tail Risk Details");
   });
 
   it("has no rankings (binary market)", () => {
@@ -242,6 +273,89 @@ Base rate anchor`;
   it("parses betting recommendation with parenthetical bankroll label", () => {
     expect(report.bettingRecommendation).toContain("NO");
     expect(report.bettingRecommendation).toContain("21 cents");
+  });
+});
+
+describe("parseReport — source merging", () => {
+  const reportWithSources = `# Analysis: Test
+Generated: 2026-01-01
+Ticker: TEST
+
+## Calibrator Report
+KEY SOURCES:
+- WMO Global Climate Update — WMO (2025)
+- Berkeley Earth Temperature Report — Berkeley Earth (2025)
+- Carbon Brief Analysis — Carbon Brief (2025)
+
+ANALYST NOTES:
+Done.
+
+## Evidence Agent
+Research done.
+
+## SOURCES POOL
+- [WMO Global Annual Climate Update](https://wmo.int/publication-series/climate-update)
+- [Global Temperature Report for 2025 - Berkeley Earth](https://berkeleyearth.org/global-temperature-report-for-2025/)
+- [When might the world exceed 1.5C? - Carbon Brief](https://www.carbonbrief.org/analysis-exceed-1-5c/)
+- [Extra source not in KEY SOURCES](https://example.com/extra)
+
+## Devil's Advocate
+DA output.
+
+## Resolution Analysis
+Resolution output.
+
+## Chaos Agent
+Chaos output.`;
+
+  const report = parseReport(reportWithSources);
+
+  it("merges URLs from SOURCES POOL into KEY SOURCES by title matching", () => {
+    const wmo = report.keySources.find((s) => s.title.includes("WMO"));
+    expect(wmo?.url).toContain("wmo.int");
+
+    const berkeley = report.keySources.find((s) => s.title.includes("Berkeley"));
+    expect(berkeley?.url).toContain("berkeleyearth.org");
+
+    const carbonBrief = report.keySources.find((s) => s.title.includes("Carbon Brief"));
+    expect(carbonBrief?.url).toContain("carbonbrief.org");
+  });
+
+  it("includes extra pool sources not in KEY SOURCES", () => {
+    const extra = report.keySources.find((s) => s.url?.includes("example.com/extra"));
+    expect(extra).toBeDefined();
+  });
+
+  it("all merged sources have URLs", () => {
+    for (const s of report.keySources) {
+      expect(s.url.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("parseReport — sources pool formats", () => {
+  it("parses pipe-separated format: [title] | [url]", () => {
+    const report = parseReport(`## Calibrator Report
+Done.
+
+## Evidence Agent
+Research.
+
+## SOURCES POOL
+- [NASA Temperature Data] | [https://nasa.gov/temp]
+- [NOAA Report] | [https://noaa.gov/report]
+
+## Devil's Advocate
+DA.
+
+## Resolution Analysis
+Res.
+
+## Chaos Agent
+Chaos.`);
+
+    const nasa = report.keySources.find((s) => s.title.includes("NASA"));
+    expect(nasa?.url).toBe("https://nasa.gov/temp");
   });
 });
 

@@ -99,50 +99,8 @@ function RichBulletSection({ text, icon }: { text: string; icon?: string }) {
   );
 }
 
-/** Renders a betting recommendation block */
-function BettingBlock({ text }: { text: string }) {
-  const items = parseBulletBlock(text);
-
-  // Try to find the main position line (starts with YES/NO or Buy/Sell)
-  const positionLine = items.find((l) =>
-    /^(YES|NO|Buy|Sell)\b/i.test(l) || /\$\d/.test(l),
-  );
-  const details = items.filter((l) => l !== positionLine);
-
-  return (
-    <div className="space-y-3">
-      {positionLine && (
-        <div className="bg-neutral-800/50 border border-neutral-700/50 rounded-lg p-3">
-          <p className="text-sm font-mono text-neutral-200 leading-relaxed">
-            <RichText text={positionLine} />
-          </p>
-        </div>
-      )}
-      {!positionLine && (
-        <div className="bg-neutral-800/50 border border-neutral-700/50 rounded-lg p-3">
-          <p className="text-sm text-neutral-300 leading-relaxed">
-            <RichText text={text.split("\n")[0]} />
-          </p>
-        </div>
-      )}
-      {details.length > 0 && (
-        <ul className="space-y-1.5 ml-1">
-          {details.map((item, i) => (
-            <li key={i} className="flex items-start gap-2 text-sm">
-              <span className="mt-1.5 w-1 h-1 rounded-full flex-shrink-0 bg-neutral-600" />
-              <span className="text-neutral-400">
-                <RichText text={item} />
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-/** Renders cross-market comparison — detects markdown tables or text */
-function CrossMarketBlock({ text }: { text: string }) {
+/** Renders content that may contain markdown tables, bullet lists, or paragraphs */
+function SmartBlock({ text }: { text: string }) {
   // Check if it contains a markdown table
   const lines = text.split("\n").filter((l) => l.trim());
   const tableLines = lines.filter((l) => l.includes("|"));
@@ -304,7 +262,7 @@ export default function ReportViewer({ report }: Props) {
       {/* === Betting Recommendation === */}
       {report.bettingRecommendation && (
         <ReportSection title="Betting Recommendation" badge="$100" badgeColor="bg-emerald-900/50">
-          <BettingBlock text={report.bettingRecommendation} />
+          <SmartBlock text={report.bettingRecommendation} />
         </ReportSection>
       )}
 
@@ -325,7 +283,7 @@ export default function ReportViewer({ report }: Props) {
       {/* === Cross-Market === */}
       {report.crossMarket && (
         <ReportSection title="Cross-Market Comparison">
-          <CrossMarketBlock text={report.crossMarket} />
+          <SmartBlock text={report.crossMarket} />
         </ReportSection>
       )}
 
@@ -364,9 +322,7 @@ export default function ReportViewer({ report }: Props) {
       {/* === Analyst Notes === */}
       {report.analystNotes && (
         <ReportSection title="Analyst Notes" defaultOpen={false}>
-          <p className="text-sm text-neutral-400 leading-relaxed">
-            <RichText text={report.analystNotes} />
-          </p>
+          <SmartBlock text={report.analystNotes} />
         </ReportSection>
       )}
 
@@ -380,7 +336,7 @@ export default function ReportViewer({ report }: Props) {
       {/* === Delta Analysis === */}
       {report.deltaAnalysis && (
         <ReportSection title="Delta Analysis" badge="vs prior" badgeColor="bg-purple-900/50">
-          <CrossMarketBlock text={report.deltaAnalysis} />
+          <SmartBlock text={report.deltaAnalysis} />
         </ReportSection>
       )}
 

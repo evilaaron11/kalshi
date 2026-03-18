@@ -64,17 +64,43 @@ export interface ParsedReport {
   rawCalibrator: string;
 }
 
-function extractSection(text: string, header: string): string | null {
+/**
+ * The known top-level section headers written by saveReport() in pipeline.ts.
+ * Sub-headers inside agent output (## FACTUAL SUMMARY, ## SOURCES POOL, etc.)
+ * are NOT top-level — they belong to the parent section.
+ */
+const TOP_LEVEL_HEADERS = [
+  "## Calibrator Report",
+  "## Evidence Agent",
+  "## Devil's Advocate",
+  "## Resolution Analysis",
+  "## Chaos Agent",
+  "## Delta Analysis",
+];
+
+/**
+ * Extract a top-level section, stopping only at the next known top-level header.
+ * This prevents sub-headers inside agent output from truncating the section.
+ */
+function extractTopLevelSection(text: string, header: string): string | null {
   const idx = text.indexOf(header);
   if (idx === -1) return null;
   const start = idx + header.length;
-  // Find next section header (## or end of text)
-  const nextHeader = text.indexOf("\n## ", start);
-  return text.slice(start, nextHeader === -1 ? undefined : nextHeader).trim();
+
+  // Find the earliest next top-level header after our start position
+  let end = text.length;
+  for (const h of TOP_LEVEL_HEADERS) {
+    if (h === header) continue;
+    const pos = text.indexOf(`\n${h}`, start);
+    if (pos !== -1 && pos < end) {
+      end = pos;
+    }
+  }
+
+  return text.slice(start, end).trim();
 }
 
 function extractLabelValue(text: string, label: string): string | null {
-  // Match "LABEL:  value" or "LABEL:value" (case insensitive, flexible whitespace)
   const regex = new RegExp(`${label}\\s*[:.]\\s*(.+?)(?:\\n|$)`, "i");
   const m = text.match(regex);
   return m ? m[1].trim() : null;
@@ -90,16 +116,61 @@ function extractBulletList(text: string, sectionLabel: string): string[] {
     .filter((l) => l.length > 0);
 }
 
-function parseSources(text: string): SourceEntry[] {
-  const section = text.match(/KEY SOURCES\s*[:.]?\s*\n([\s\S]*?)(?=\n[A-Z][A-Z\s]+[:.]\s*\n|$)/);
+/**
+ * Parse sources from the calibrator's KEY SOURCES section.
+ * These typically have NO URLs — just "title — source (date)" format.
+ */
+function parseKeySources(text: string): SourceEntry[] {
+  const section = text.match(/KEY SOURCES\s*[:.]?\s*\n([\s\S]*?)(?=\n---|\n[A-Z][A-Z\s]+[:.]\s*\n|$)/);
   if (!section) return [];
   const lines = section[1].split("\n").filter((l) => l.trim().startsWith("-"));
   return lines.map((l) => {
     const clean = l.replace(/^[-*]\s*/, "").trim();
-    // Try to extract URL from markdown link or bare URL
+    // Check for markdown link: [title](url)
+    const mdLink = clean.match(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/);
+    if (mdLink) {
+      return { title: mdLink[1], url: mdLink[2] };
+    }
+    // Check for bare URL
     const urlMatch = clean.match(/\bhttps?:\/\/\S+/);
-    const title = clean.replace(/\s*\bhttps?:\/\/\S+/, "").replace(/[[\]()]/g, "").trim();
-    return { title: title || clean, url: urlMatch?.[0] || "" };
+    if (urlMatch) {
+      const title = clean.replace(/\s*\bhttps?:\/\/\S+/, "").replace(/[[\]()]/g, "").trim();
+      return { title: title || clean, url: urlMatch[0] };
+    }
+    // Strip quotes around title
+    const stripped = clean.replace(/^["']|["']$/g, "");
+    return { title: stripped, url: "" };
+  });
+}
+
+/**
+ * Parse sources from the evidence agent's SOURCES POOL section.
+ * These have full markdown links: [title](url)
+ */
+function parseSourcesPool(text: string): SourceEntry[] {
+  if (!text) return [];
+  const section = text.match(/## SOURCES POOL\s*\n([\s\S]*?)(?=\n## |$)/);
+  if (!section) return [];
+  const lines = section[1].split("\n").filter((l) => l.trim().startsWith("-"));
+  return lines.map((l) => {
+    const clean = l.replace(/^[-*]\s*/, "").trim();
+    // markdown link: [title](url)
+    const mdLink = clean.match(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/);
+    if (mdLink) {
+      return { title: mdLink[1], url: mdLink[2] };
+    }
+    // Pipe-separated: [title] | [url]
+    const pipeMatch = clean.match(/\[([^\]]+)\]\s*\|\s*\[?(https?:\/\/[^\s\]]+)/);
+    if (pipeMatch) {
+      return { title: pipeMatch[1], url: pipeMatch[2] };
+    }
+    // bare URL
+    const urlMatch = clean.match(/\bhttps?:\/\/\S+/);
+    if (urlMatch) {
+      const title = clean.replace(/\s*\bhttps?:\/\/\S+/, "").replace(/[[\]()]/g, "").trim();
+      return { title: title || urlMatch[0], url: urlMatch[0] };
+    }
+    return { title: clean.replace(/[[\]]/g, ""), url: "" };
   });
 }
 
@@ -129,13 +200,13 @@ function parseRankings(text: string): RankingEntry[] {
 }
 
 export function parseReport(raw: string): ParsedReport {
-  // Split into top-level sections
-  const calibratorSection = extractSection(raw, "## Calibrator Report") || raw;
-  const evidenceSection = extractSection(raw, "## Evidence Agent");
-  const daSection = extractSection(raw, "## Devil's Advocate");
-  const resolutionSection = extractSection(raw, "## Resolution Analysis");
-  const chaosSection = extractSection(raw, "## Chaos Agent");
-  const deltaSection = extractSection(raw, "## Delta Analysis");
+  // Split into top-level sections using the known headers
+  const calibratorSection = extractTopLevelSection(raw, "## Calibrator Report") || raw;
+  const evidenceSection = extractTopLevelSection(raw, "## Evidence Agent");
+  const daSection = extractTopLevelSection(raw, "## Devil's Advocate");
+  const resolutionSection = extractTopLevelSection(raw, "## Resolution Analysis");
+  const chaosSection = extractTopLevelSection(raw, "## Chaos Agent");
+  const deltaSection = extractTopLevelSection(raw, "## Delta Analysis");
 
   // Parse header
   const titleMatch = raw.match(/^# Analysis:\s*(.+)/m);
@@ -174,7 +245,12 @@ export function parseReport(raw: string): ParsedReport {
   const methodology = extractLabeledBlock(calibratorSection, "PROBABILITY METHODOLOGY");
 
   const rankings = parseRankings(calibratorSection);
-  const sources = parseSources(calibratorSection);
+
+  // Merge sources: KEY SOURCES (from calibrator) + SOURCES POOL (from evidence agent)
+  const keySources = parseKeySources(calibratorSection);
+  const poolSources = parseSourcesPool(evidenceSection || "");
+  // Deduplicate: if a key source has no URL, try to find a matching pool source by title similarity
+  const mergedSources = mergeSourceLists(keySources, poolSources);
 
   return {
     title: titleMatch?.[1] || "",
@@ -195,7 +271,7 @@ export function parseReport(raw: string): ParsedReport {
     bearCase,
     tailRisks,
     resolutionWatch,
-    keySources: sources,
+    keySources: mergedSources,
     analystNotes,
     crossMarket,
     bettingRecommendation: bettingRec,
@@ -209,15 +285,63 @@ export function parseReport(raw: string): ParsedReport {
   };
 }
 
+/**
+ * Merge KEY SOURCES (may lack URLs) with SOURCES POOL (has URLs).
+ * For key sources without URLs, attempt to match by title keyword overlap.
+ * Append any pool sources not already represented.
+ */
+function mergeSourceLists(keySources: SourceEntry[], poolSources: SourceEntry[]): SourceEntry[] {
+  if (poolSources.length === 0) return keySources;
+  if (keySources.length === 0) return poolSources;
+
+  const usedPoolIndices = new Set<number>();
+
+  const merged = keySources.map((ks) => {
+    if (ks.url) return ks; // Already has a URL
+
+    // Try to find matching pool source by title keyword overlap
+    const ksWords = ks.title.toLowerCase().split(/\W+/).filter((w) => w.length > 3);
+    let bestMatch = -1;
+    let bestScore = 0;
+
+    for (let i = 0; i < poolSources.length; i++) {
+      if (usedPoolIndices.has(i)) continue;
+      const ps = poolSources[i];
+      if (!ps.url) continue;
+      const psText = ps.title.toLowerCase();
+      const hits = ksWords.filter((w) => psText.includes(w)).length;
+      if (hits > bestScore && hits >= 2) {
+        bestScore = hits;
+        bestMatch = i;
+      }
+    }
+
+    if (bestMatch >= 0) {
+      usedPoolIndices.add(bestMatch);
+      return { title: ks.title, url: poolSources[bestMatch].url };
+    }
+    return ks;
+  });
+
+  // Append unmatched pool sources that have URLs
+  for (let i = 0; i < poolSources.length; i++) {
+    if (!usedPoolIndices.has(i) && poolSources[i].url) {
+      merged.push(poolSources[i]);
+    }
+  }
+
+  return merged;
+}
+
 function extractLabeledBlock(text: string, label: string): string | null {
-  const regex = new RegExp(`${label}\\s*[:.]?\\s*\\n([\\s\\S]*?)(?=\\n[A-Z][A-Z\\s]{3,}[:.\\n]|$)`);
+  const regex = new RegExp(`${label}\\s*[:.]?\\s*\\n([\\s\\S]*?)(?=\\n---\\s*\\n|\\n[A-Z][A-Z\\s]{3,}[:.\\n]|$)`);
   const m = text.match(regex);
   return m ? m[1].trim() : null;
 }
 
 /** Looser version that handles labels with parenthetical suffixes like "BETTING RECOMMENDATION ($100 BANKROLL):" */
 function extractLabeledBlockLoose(text: string, label: string): string | null {
-  const regex = new RegExp(`${label}[^\\n]*[:.]?\\s*\\n([\\s\\S]*?)(?=\\n[A-Z][A-Z\\s]{3,}[(:.]|$)`);
+  const regex = new RegExp(`${label}[^\\n]*[:.]?\\s*\\n([\\s\\S]*?)(?=\\n---\\s*\\n|\\n[A-Z][A-Z\\s]{3,}[(:.]|$)`);
   const m = text.match(regex);
   return m ? m[1].trim() : null;
 }
