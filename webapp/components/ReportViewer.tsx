@@ -204,12 +204,11 @@ function PreBlock({ text }: { text: string }) {
 
 export default function ReportViewer({ report }: Props) {
   const isEvent = report.rankings.length > 0;
-  const [showAllRankings, setShowAllRankings] = useState(false);
+  const [rankingsCollapsed, setRankingsCollapsed] = useState(false);
 
-  // For events, show top 5 in header, rest in expandable
-  const INITIAL_RANKINGS = 5;
-  const topRankings = report.rankings.slice(0, INITIAL_RANKINGS);
-  const remainingRankings = report.rankings.slice(INITIAL_RANKINGS);
+  // For events with many outcomes, show all by default but allow collapsing
+  const COLLAPSE_THRESHOLD = 10;
+  const hasMany = report.rankings.length > COLLAPSE_THRESHOLD;
 
   return (
     <div className="space-y-3">
@@ -261,24 +260,27 @@ export default function ReportViewer({ report }: Props) {
                 <span className="w-12 text-right">Edge</span>
               </div>
             </div>
-            {topRankings.map((r) => (
-              <RankingRow key={r.rank} r={r} />
-            ))}
-            {remainingRankings.length > 0 && (
-              <>
-                {showAllRankings && remainingRankings.map((r) => (
-                  <RankingRow key={r.rank} r={r} />
-                ))}
-                <button
-                  onClick={() => setShowAllRankings(!showAllRankings)}
-                  className="w-full text-center text-xs text-neutral-500 hover:text-neutral-300 py-2 mt-1 border-t border-neutral-800/50"
-                >
-                  {showAllRankings
-                    ? "Show less"
-                    : `Show all ${report.rankings.length} outcomes (+${remainingRankings.length} more)`}
-                </button>
-              </>
+            <div className={hasMany && rankingsCollapsed ? "max-h-60 overflow-hidden relative" : ""}>
+              {report.rankings.map((r) => (
+                <RankingRow key={r.rank} r={r} />
+              ))}
+              {hasMany && rankingsCollapsed && (
+                <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-neutral-900 to-transparent" />
+              )}
+            </div>
+            {hasMany && (
+              <button
+                onClick={() => setRankingsCollapsed(!rankingsCollapsed)}
+                className="w-full text-center text-xs text-blue-400 hover:text-blue-300 py-2 mt-1 border-t border-neutral-800/50"
+              >
+                {rankingsCollapsed
+                  ? `Show all ${report.rankings.length} outcomes`
+                  : "Collapse rankings"}
+              </button>
             )}
+            <div className="text-xs text-neutral-600 mt-1 text-right">
+              {report.rankings.length} outcomes ranked
+            </div>
           </div>
         )}
 

@@ -175,7 +175,8 @@ function parseSourcesPool(text: string): SourceEntry[] {
 }
 
 function parseRankings(text: string): RankingEntry[] {
-  const section = text.match(/RANKING\s*[:.]?\s*\n([\s\S]*?)(?=\nDARK HORSE|TAIL RISKS|CONFIDENCE|$)/i);
+  // Each alternative must be preceded by \n to avoid matching inside ranking text
+  const section = text.match(/RANKING\s*[:.]?\s*\n([\s\S]*?)(?=\n---\s*\n|\nDARK HORSE|\nTAIL RISKS|\nCONFIDENCE|\n## |$)/i);
   if (!section) return [];
 
   const entries: RankingEntry[] = [];
