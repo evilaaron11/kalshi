@@ -6,61 +6,252 @@ Available as both a **web app** (Next.js dashboard with real-time SSE progress) 
 
 ## Architecture
 
+### System Overview
+
 ```
-webapp/                          Unified Next.js 15 app (TypeScript)
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          «system» Kalshi Analyst                       │
+│                                                                        │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │                    «subsystem» Next.js App                       │  │
+│  │                                                                  │  │
+│  │  ┌─────────────────┐      ┌─────────────────────────────────┐   │  │
+│  │  │  «component»    │      │      «component» API Routes     │   │  │
+│  │  │  React Frontend │      │                                 │   │  │
+│  │  │                 │ HTTP │  /api/markets    GET|POST|DELETE │   │  │
+│  │  │  Dashboard      │─────│  /api/analyze     POST           │   │  │
+│  │  │  MarketCard     │      │  /api/analyze/:id/sse    GET    │   │  │
+│  │  │  ReportViewer   │ SSE  │  /api/analyze/:id/report GET    │   │  │
+│  │  │  ProgressStepper│◄─────│  /api/analyze/:id/cancel POST   │   │  │
+│  │  └─────────────────┘      └──────────┬──────────────────────┘   │  │
+│  │          │                           │                          │  │
+│  │          │ useAnalysis()             │ pipeline.ts               │  │
+│  │          │ (EventSource)             │ (orchestration)           │  │
+│  │          ▼                           ▼                          │  │
+│  │  ┌─────────────────┐      ┌─────────────────────────────────┐   │  │
+│  │  │  «component»    │      │      «component» Lib Core       │   │  │
+│  │  │  Report Parser  │      │                                 │   │  │
+│  │  │                 │      │  kalshi.ts ─── RSA auth ──────┐ │   │  │
+│  │  │  reportParser.ts│      │  pipeline.ts ── spawn ──────┐ │ │   │  │
+│  │  │  richTextUtils  │      │  prompts.ts                 │ │ │   │  │
+│  │  │  RichText.tsx   │      │  watchlist.ts               │ │ │   │  │
+│  │  └─────────────────┘      └─────────────────────────┬───┘ │ │   │  │
+│  │                                                     │     │ │   │  │
+│  │  ┌──────────────────────────────────────────────────┐│     │ │   │  │
+│  │  │            «component» Fetcher CLI               ││     │ │   │  │
+│  │  │                                                  ││     │ │   │  │
+│  │  │  cli.ts ─── crossMarket.ts ── polling.ts         ││     │ │   │  │
+│  │  │         ├── fec.ts         ── whitehouse.ts      ││     │ │   │  │
+│  │  │         └── oira.ts                              ││     │ │   │  │
+│  │  └──────────────────────────────────────────────────┘│     │ │   │  │
+│  └──────────────────────────────────────────────────────┘     │ │   │  │
+│                                                               │ │   │  │
+│  ┌────────────────────────────────────────────────────────────┘ │   │  │
+│  │                                                              │   │  │
+│  ▼                                                              ▼   │  │
+│  ┌─────────────────────────────┐   ┌───────────────────────────┐   │  │
+│  │  «external» Claude CLI     │   │  «external» Kalshi API    │   │  │
+│  │                             │   │                           │   │  │
+│  │  claude -p --model <model>  │   │  api.elections.kalshi.com │   │  │
+│  │  --output-format stream-json│   │  /trade-api/v2            │   │  │
+│  │                             │   │  RSA-signed (PKCS1v15)    │   │  │
+│  │  ┌───────────────────────┐  │   └───────────────────────────┘   │  │
+│  │  │ «agent» Evidence      │  │                                   │  │
+│  │  │ haiku · 7 searches    │  │   ┌───────────────────────────┐   │  │
+│  │  ├───────────────────────┤  │   │  «external» Data Sources  │   │  │
+│  │  │ «agent» Devil's Advoc.│  │   │                           │   │  │
+│  │  │ haiku · 5 searches    │  │   │  Polymarket (gamma API)   │   │  │
+│  │  ├───────────────────────┤  │   │  Metaculus  (REST API)    │   │  │
+│  │  │ «agent» Resolution    │  │   │  FEC        (open.fec.gov)│   │  │
+│  │  │ sonnet · 1 search     │──┼──▶│  Fed Register (JSON API) │   │  │
+│  │  ├───────────────────────┤  │   │  OIRA       (XML feed)   │   │  │
+│  │  │ «agent» Chaos         │  │   │  White House (RSS feeds)  │   │  │
+│  │  │ haiku · 1 search      │  │   │  Wikipedia  (MediaWiki)   │   │  │
+│  │  ├───────────────────────┤  │   │  RCP        (HTML scrape) │   │  │
+│  │  │ «agent» Calibrator    │  │   └───────────────────────────┘   │  │
+│  │  │ sonnet · no search    │  │                                   │  │
+│  │  └───────────────────────┘  │                                   │  │
+│  └─────────────────────────────┘                                   │  │
+│                                                                        │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │                     «storage» File System                        │  │
+│  │  data/watchlist.json          results/YYYY-MM-DD_HHMM_TICKER.md │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Pipeline Sequence
+
+```
+ ┌────────┐  ┌──────────┐  ┌───────────┐  ┌────────────┐  ┌───────┐  ┌────────────┐
+ │ Client │  │ API Route│  │ pipeline.ts│  │ Claude CLI │  │Fetchers│  │External API│
+ └───┬────┘  └────┬─────┘  └─────┬─────┘  └─────┬──────┘  └───┬───┘  └─────┬──────┘
+     │            │              │               │             │            │
+     │ POST /analyze             │               │             │            │
+     │───────────>│ startRun()   │               │             │            │
+     │            │─────────────>│               │             │            │
+     │ GET /sse   │              │               │             │            │
+     │───────────>│ subscribe()  │               │             │            │
+     │◄╌╌╌╌╌╌╌╌╌╌│╌╌╌ SSE ╌╌╌╌╌│               │             │            │
+     │            │              │               │             │            │
+     │            │  ╔═══════════╧═══════╗       │             │            │
+     │            │  ║ Phase 0: Fetch    ║       │             │            │
+     │            │  ╚═══════════╤═══════╝       │             │            │
+     │            │              │ fetchMarket() │             │            │
+     │            │              │───────────────┼─────────────┼───────────>│ Kalshi API
+     │            │              │◄──────────────┼─────────────┼────────────│
+     │◄╌╌ stage: fetch complete ╌│               │             │            │
+     │            │              │               │             │            │
+     │            │  ╔═══════════╧═══════════════╗             │            │
+     │            │  ║ Phase 1: Sequential       ║             │            │
+     │            │  ╚═══════════╤═══════════════╝             │            │
+     │            │              │ spawn(claude)  │             │            │
+     │            │              │───────────────>│ Evidence    │            │
+     │            │              │                │  WebSearch ─┼───────────>│
+     │            │              │                │  Bash(cli)──┼──>│        │
+     │◄╌╌ progress: Searching╌╌╌│◄╌╌stream-json╌╌│            │  run()     │
+     │◄╌╌ progress: Fetcher ╌╌╌╌│◄╌╌╌╌╌╌╌╌╌╌╌╌╌╌│            │◄──│        │
+     │            │              │◄───────────────│ result     │            │
+     │◄╌╌ stage: evidence done ╌╌│               │             │            │
+     │            │              │                │             │            │
+     │            │              │ spawn(claude)  │             │            │
+     │            │              │───────────────>│ Devil's Adv │            │
+     │◄╌╌ progress events ╌╌╌╌╌╌│◄╌╌stream-json╌╌│            │            │
+     │            │              │◄───────────────│ result     │            │
+     │◄╌╌ stage: DA done ╌╌╌╌╌╌╌│               │             │            │
+     │            │              │               │             │            │
+     │            │  ╔═══════════╧═══════════════╗             │            │
+     │            │  ║ Phase 2: Parallel         ║             │            │
+     │            │  ╚═══════════╤═══════════════╝             │            │
+     │            │              │──┬─ spawn ───>│ Resolution  │            │
+     │            │              │  └─ spawn ───>│ Chaos       │            │
+     │◄╌╌ progress (interleaved)╌│◄╌╌╌╌╌╌╌╌╌╌╌╌╌│             │            │
+     │            │              │◄──────────────│ both done   │            │
+     │◄╌╌ stages: res+chaos done│               │             │            │
+     │            │              │               │             │            │
+     │            │  ╔═══════════╧═══════════════╗             │            │
+     │            │  ║ Phase 3: Synthesis        ║             │            │
+     │            │  ╚═══════════╤═══════════════╝             │            │
+     │            │              │ spawn(claude)  │             │            │
+     │            │              │───────────────>│ Calibrator  │            │
+     │            │              │◄───────────────│ final report│            │
+     │◄╌╌ stage: calibrator done│               │             │            │
+     │            │              │               │             │            │
+     │            │              │ saveReport()  │             │            │
+     │            │              │──────────────>│ results/*.md │            │
+     │◄╌╌ event: complete ╌╌╌╌╌╌│               │             │            │
+     │            │              │               │             │            │
+```
+
+### Component Diagram
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      «page» Dashboard                       │
+│                        app/page.tsx                          │
+├───────────┬───────────────────────────────────┬─────────────┤
+│           │                                   │             │
+│           ▼                                   ▼             │
+│  ┌─────────────────┐                ┌──────────────────┐    │
+│  │  AddMarketModal  │                │   useAnalysis()  │    │
+│  │                 │                │  (SSE hook)      │    │
+│  └─────────────────┘                └────────┬─────────┘    │
+│                                              │              │
+│           ┌──────────────────────────────────┘              │
+│           ▼                                                 │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │                 «component» MarketCard                │   │
+│  ├──────────────────────────────────────────────────────┤   │
+│  │  market: MarketSummary                               │   │
+│  │  runState: RunState                                  │   │
+│  ├──────────┬───────────────────┬───────────────────────┤   │
+│  │          │                   │                       │   │
+│  │          ▼                   ▼                       │   │
+│  │  ┌──────────────┐   ┌───────────────────────────┐    │   │
+│  │  │ OutcomeBar   │   │    ProgressStepper        │    │   │
+│  │  │ (events)     │   │                           │    │   │
+│  │  └──────────────┘   │  ┌─────────────────────┐  │    │   │
+│  │                     │  │    StageDetail       │  │    │   │
+│  │                     │  │  (tool activity feed)│  │    │   │
+│  │                     │  └─────────────────────┘  │    │   │
+│  │                     └───────────────────────────┘    │   │
+│  │                              │                       │   │
+│  │                              ▼                       │   │
+│  │  ┌───────────────────────────────────────────────┐   │   │
+│  │  │            «component» ReportViewer            │   │   │
+│  │  ├───────────────────────────────────────────────┤   │   │
+│  │  │  ┌──────────┐ ┌──────────┐ ┌──────────────┐  │   │   │
+│  │  │  │ Verdict  │ │Bull/Bear │ │  Betting Rec  │  │   │   │
+│  │  │  │ Header   │ │ Columns  │ │  Card         │  │   │   │
+│  │  │  └──────────┘ └──────────┘ └──────────────┘  │   │   │
+│  │  │  ┌──────────┐ ┌──────────┐ ┌──────────────┐  │   │   │
+│  │  │  │Tail Risks│ │Resolution│ │ Cross-Market  │  │   │   │
+│  │  │  │  (icons) │ │  Watch   │ │ Table/Text    │  │   │   │
+│  │  │  └──────────┘ └──────────┘ └──────────────┘  │   │   │
+│  │  │  ┌──────────┐ ┌──────────┐ ┌──────────────┐  │   │   │
+│  │  │  │  Sources │ │Methodol. │ │ Agent Outputs │  │   │   │
+│  │  │  │ (links)  │ │(collapse)│ │  (collapsed)  │  │   │   │
+│  │  │  └──────────┘ └──────────┘ └──────────────┘  │   │   │
+│  │  │                                               │   │   │
+│  │  │  Uses: RichText, ReportSection, RichBullet    │   │   │
+│  │  └───────────────────────────────────────────────┘   │   │
+│  └──────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### File Structure
+
+```
+webapp/
 ├── app/                         Pages & API routes
-│   ├── page.tsx                 Dashboard — watchlist with live prices
+│   ├── page.tsx                 Dashboard
 │   └── api/
-│       ├── markets/             CRUD for watchlist + live Kalshi prices
-│       └── analyze/             Pipeline orchestration + SSE streaming
-├── components/                  React UI (MarketCard, ProgressStepper, etc.)
+│       ├── markets/             CRUD + live Kalshi prices
+│       └── analyze/             Pipeline orchestration + SSE
+├── components/                  React UI
+│   ├── MarketCard.tsx           Market display + analysis trigger
+│   ├── ReportViewer.tsx         Structured report rendering
+│   ├── ProgressStepper.tsx      Pipeline stage indicators
+│   ├── StageDetail.tsx          Per-stage tool activity feed
+│   ├── ReportSection.tsx        Collapsible section wrapper
+│   ├── RichText.tsx             Inline markdown renderer
+│   ├── OutcomeBar.tsx           Event outcome probability bar
+│   └── AddMarketModal.tsx       URL input modal
 ├── lib/
-│   ├── kalshi.ts                Kalshi API client (RSA-signed auth)
-│   ├── pipeline.ts              Multi-agent orchestration (spawns Claude CLI)
-│   ├── prompts.ts               All agent prompt templates
+│   ├── kalshi.ts                Kalshi API client (RSA auth)
+│   ├── pipeline.ts              Agent orchestration (Claude CLI)
+│   ├── prompts.ts               Agent prompt templates
+│   ├── reportParser.ts          Report text → structured data
+│   ├── richTextUtils.ts         Markdown tokenizer + bullet parser
 │   ├── fetchers/                Primary-source data fetchers
-│   │   ├── cli.ts               CLI entry point (agents call via Bash)
-│   │   ├── crossMarket.ts       Polymarket + Metaculus price comparison
-│   │   ├── fec.ts               FEC campaign finance data
-│   │   ├── oira.ts              Federal Register + OIRA regulatory pipeline
-│   │   ├── polling.ts           Wikipedia + RCP polling averages
-│   │   └── whitehouse.ts        White House executive actions & briefings
-│   ├── config.ts                API endpoints, timeouts, constants
+│   │   ├── cli.ts               CLI entry point for agents
+│   │   ├── crossMarket.ts       Polymarket + Metaculus
+│   │   ├── fec.ts               FEC campaign finance
+│   │   ├── oira.ts              Federal Register + OIRA
+│   │   ├── polling.ts           Wikipedia + RCP polling
+│   │   └── whitehouse.ts        White House actions
+│   ├── config.ts                API endpoints + constants
 │   ├── httpClient.ts            Shared fetch wrapper
-│   ├── textUtils.ts             HTML stripping, fuzzy matching
-│   ├── types.ts                 TypeScript type definitions
-│   ├── useAnalysis.ts           React hook for SSE pipeline progress
-│   └── watchlist.ts             Watchlist persistence (JSON file)
-├── __tests__/                   Vitest test suite
+│   ├── textUtils.ts             HTML stripping, fuzzy match
+│   ├── types.ts                 TypeScript definitions
+│   ├── useAnalysis.ts           SSE hook for pipeline progress
+│   └── watchlist.ts             Watchlist persistence
+├── __tests__/                   Vitest test suite (84 tests)
 ├── data/watchlist.json          Saved watchlist tickers
-└── results/                     Saved analysis reports (markdown)
+└── results/                     Analysis reports (markdown)
 ```
 
 ## Pipeline
 
-```
-/analyze-market <url>
-      │
-      └── kalshi.ts   →  fetch live market data + prices
-            │
-            ▼
-      Phase 1 — Sequential Research
-      │
-      ├── Evidence Agent (haiku)       max 7 web searches + fetcher tools
-      │         │
-      │         ▼
-      └── Devil's Advocate (haiku)     max 5 searches, extends sources pool
-            │
-            ▼
-      Phase 2 — Parallel Analysis
-      │
-      ├── Resolution Agent (sonnet)    criteria & edge cases (max 1 search)
-      │
-      └── Chaos Agent (haiku)          tail risks 1–8% (max 1 search)
-            │
-            ▼
-      Calibrator (sonnet)  →  final report + edge + bet sizing
-```
+The analysis pipeline runs 4 subagents + 1 calibrator as Claude CLI subprocesses:
+
+| Phase | Agent | Model | Searches | Role |
+|---|---|---|---|---|
+| 1 (seq) | Evidence | haiku | 7 | Factual research + fetcher tools |
+| 1 (seq) | Devil's Advocate | haiku | 5 | Contrarian case, extends sources |
+| 2 (par) | Resolution | sonnet | 1 | Criteria analysis, edge cases |
+| 2 (par) | Chaos | haiku | 1 | Tail risks (1-8% scenarios) |
+| 3 | Calibrator | sonnet | 0 | Synthesis, probability, bet sizing |
 
 Supports both **single binary markets** and **multi-outcome events**.
 
