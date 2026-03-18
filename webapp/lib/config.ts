@@ -8,7 +8,7 @@ export const KALSHI_REQUEST_TIMEOUT = 10_000; // ms
 // --- FEC ---
 export const FEC_API_BASE = "https://api.open.fec.gov/v1";
 export const FEC_DEFAULT_API_KEY = "DEMO_KEY";
-export const FEC_REQUEST_TIMEOUT = 15_000;
+export const FEC_REQUEST_TIMEOUT = 30_000;
 export const FEC_PER_PAGE_LIMIT = 20;
 
 // --- Federal Register & OIRA ---

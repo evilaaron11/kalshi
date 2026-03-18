@@ -79,10 +79,23 @@ export interface StageEvent {
   detail?: string;
 }
 
+export type ToolCategory = "search" | "fetcher" | "bash" | "thinking";
+
 export interface ProgressEvent {
   kind: "progress";
   stage: PipelineStage;
   detail: string;
+  toolName?: string;
+  toolCategory?: ToolCategory;
+  timestamp?: number;
+}
+
+export interface ProgressDetail {
+  stage: PipelineStage;
+  toolName: string;
+  toolCategory: ToolCategory;
+  summary: string;
+  timestamp: number;
 }
 
 export interface CompleteEvent {

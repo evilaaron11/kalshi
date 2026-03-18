@@ -3,8 +3,11 @@
 import { useEffect, useState } from "react";
 import type { MarketSummary } from "@/lib/types";
 import type { RunState } from "@/lib/useAnalysis";
+import type { ParsedReport } from "@/lib/reportParser";
+import { parseReport } from "@/lib/reportParser";
 import ProgressStepper from "./ProgressStepper";
 import OutcomeBar from "./OutcomeBar";
+import ReportViewer from "./ReportViewer";
 
 interface Props {
   market: MarketSummary;
@@ -24,7 +27,7 @@ export default function MarketCard({
   const isRunning =
     runState?.runId != null && !runState.complete && !runState.error;
   const isComplete = runState?.complete != null;
-  const [report, setReport] = useState<string | null>(null);
+  const [parsedReport, setParsedReport] = useState<ParsedReport | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [loadingReport, setLoadingReport] = useState(false);
   const [hasReport, setHasReport] = useState(false);
@@ -53,7 +56,7 @@ export default function MarketCard({
       setReportOpen(false);
       return;
     }
-    if (report) {
+    if (parsedReport) {
       setReportOpen(true);
       return;
     }
@@ -68,7 +71,8 @@ export default function MarketCard({
         resp = await fetch(`/api/markets/${market.ticker}/report`);
       }
       if (resp.ok) {
-        setReport(await resp.text());
+        const raw = await resp.text();
+        setParsedReport(parseReport(raw));
         setReportOpen(true);
       }
     } finally {
@@ -113,11 +117,11 @@ export default function MarketCard({
         {market.marketType === "binary" && (
           <div className="text-right text-sm tabular-nums whitespace-nowrap">
             <span className="text-green-400">
-              YES {((market.yesPrice || 0) * 100).toFixed(0)}{"¢"}
+              YES {((market.yesPrice || 0) * 100).toFixed(0)}{"\u00A2"}
             </span>
             <span className="text-neutral-600 mx-1">|</span>
             <span className="text-red-400">
-              NO {((market.noPrice || 0) * 100).toFixed(0)}{"¢"}
+              NO {((market.noPrice || 0) * 100).toFixed(0)}{"\u00A2"}
             </span>
           </div>
         )}
@@ -149,29 +153,19 @@ export default function MarketCard({
           ))}
           {market.subThresholdCount > 0 && (
             <div className="text-xs text-neutral-600 mt-1">
-              +{market.subThresholdCount} more under 5{"¢"}
+              +{market.subThresholdCount} more under 5{"\u00A2"}
             </div>
           )}
         </div>
       )}
 
-      {/* Progress stepper + live status */}
+      {/* Progress stepper + live activity feed */}
       {isRunning && runState && (
-        <div className="mb-3 space-y-1">
-          <ProgressStepper stages={runState.stages} />
-          {(() => {
-            // Show the latest progress detail from any running stage
-            const runningStage = Object.entries(runState.stages).find(
-              ([, s]) => s.status === "running",
-            );
-            const key = runningStage?.[0];
-            const detail = key ? runState.progress[key] : undefined;
-            return detail ? (
-              <div className="text-xs text-neutral-500 truncate">
-                {detail}
-              </div>
-            ) : null;
-          })()}
+        <div className="mb-3">
+          <ProgressStepper
+            stages={runState.stages}
+            progressHistory={runState.progressHistory}
+          />
         </div>
       )}
 
@@ -181,11 +175,9 @@ export default function MarketCard({
       )}
 
       {/* Report viewer */}
-      {reportOpen && report && (
-        <div className="mb-3 border border-neutral-700 rounded bg-neutral-950 max-h-[600px] overflow-y-auto">
-          <pre className="p-4 text-xs text-neutral-300 whitespace-pre-wrap font-mono leading-relaxed">
-            {report}
-          </pre>
+      {reportOpen && parsedReport && (
+        <div className="mb-3 max-h-[700px] overflow-y-auto">
+          <ReportViewer report={parsedReport} />
         </div>
       )}
 
@@ -203,13 +195,17 @@ export default function MarketCard({
             disabled={loadingReport}
             className="px-3 py-1 text-xs bg-neutral-800 text-neutral-300 rounded hover:bg-neutral-700"
           >
-            {loadingReport ? "Loading..." : reportOpen ? "Hide Report" : "View Report"}
+            {loadingReport
+              ? "Loading..."
+              : reportOpen
+                ? "Hide Report"
+                : "View Report"}
           </button>
         )}
         {isRunning ? (
           <button
             onClick={onCancel}
-            className="px-3 py-1 text-xs bg-neutral-800 text-neutral-300 rounded hover:bg-neutral-700"
+            className="px-3 py-1 text-xs bg-red-900/50 text-red-300 rounded hover:bg-red-800/50 border border-red-800/50"
           >
             Cancel
           </button>

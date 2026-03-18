@@ -1,13 +1,20 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import type { StageEvent, CompleteEvent, ProgressEvent } from "./types";
+import type {
+  StageEvent,
+  CompleteEvent,
+  ProgressEvent,
+  ProgressDetail,
+} from "./types";
 
 export interface RunState {
   runId: string | null;
   stages: Record<string, StageEvent>;
-  /** Latest progress detail per stage (e.g. "Searching: climate 2 degrees") */
-  progress: Record<string, string>;
+  /** Full progress history per stage */
+  progressHistory: Record<string, ProgressDetail[]>;
+  /** Latest progress detail string per stage (for one-liner display) */
+  latestProgress: Record<string, string>;
   complete: CompleteEvent | null;
   error: string | null;
 }
@@ -15,7 +22,8 @@ export interface RunState {
 const INITIAL: RunState = {
   runId: null,
   stages: {},
-  progress: {},
+  progressHistory: {},
+  latestProgress: {},
   complete: null,
   error: null,
 };
@@ -43,16 +51,37 @@ export function useAnalysis() {
       setRunState((prev) => ({
         ...prev,
         stages: { ...prev.stages, [data.stage]: data },
-        error: data.status === "error" ? data.detail || "Unknown error" : prev.error,
+        error:
+          data.status === "error"
+            ? data.detail || "Unknown error"
+            : prev.error,
       }));
     });
 
     es.addEventListener("progress", (e) => {
       const data = JSON.parse(e.data) as ProgressEvent;
-      setRunState((prev) => ({
-        ...prev,
-        progress: { ...prev.progress, [data.stage]: data.detail },
-      }));
+      const detail: ProgressDetail = {
+        stage: data.stage,
+        toolName: data.toolName || "tool",
+        toolCategory: data.toolCategory || "thinking",
+        summary: data.detail,
+        timestamp: data.timestamp || Date.now(),
+      };
+
+      setRunState((prev) => {
+        const existing = prev.progressHistory[data.stage] || [];
+        return {
+          ...prev,
+          progressHistory: {
+            ...prev.progressHistory,
+            [data.stage]: [...existing, detail],
+          },
+          latestProgress: {
+            ...prev.latestProgress,
+            [data.stage]: data.detail,
+          },
+        };
+      });
     });
 
     es.addEventListener("complete", (e) => {

@@ -11,6 +11,7 @@ import type {
   StageEvent,
   ProgressEvent,
   CompleteEvent,
+  ToolCategory,
 } from "./types";
 import { isEventData } from "./types";
 import * as prompts from "./prompts";
@@ -22,11 +23,53 @@ import * as prompts from "./prompts";
  * Uses `claude -p --model <model> --output-format stream-json` for real-time progress.
  * Calls onProgress with human-readable status updates as the agent works.
  */
+interface ToolProgress {
+  detail: string;
+  toolName: string;
+  toolCategory: ToolCategory;
+}
+
+function classifyTool(toolName: string, input: Record<string, unknown>): ToolProgress {
+  if (toolName === "WebSearch" || toolName === "web_search") {
+    return {
+      detail: `Searching: ${input.query || "..."}`,
+      toolName: "WebSearch",
+      toolCategory: "search",
+    };
+  }
+  if (toolName === "Bash") {
+    const cmd = (input.command as string) || "";
+    if (cmd.includes("cli.ts cross-market")) {
+      const q = cmd.match(/--query\s+"([^"]+)"/)?.[1] || "";
+      return { detail: `Cross-market lookup: ${q}`, toolName: "cross-market", toolCategory: "fetcher" };
+    }
+    if (cmd.includes("cli.ts whitehouse")) {
+      const q = cmd.match(/--search\s+"([^"]+)"/)?.[1] || "";
+      return { detail: `White House search: ${q}`, toolName: "whitehouse", toolCategory: "fetcher" };
+    }
+    if (cmd.includes("cli.ts oira")) {
+      const q = cmd.match(/--search\s+"([^"]+)"/)?.[1] || "";
+      return { detail: `OIRA/Fed Register: ${q}`, toolName: "oira", toolCategory: "fetcher" };
+    }
+    if (cmd.includes("cli.ts fec")) {
+      const who = cmd.match(/--(?:candidate|committee)\s+"([^"]+)"/)?.[1] || "";
+      return { detail: `FEC lookup: ${who}`, toolName: "fec", toolCategory: "fetcher" };
+    }
+    if (cmd.includes("cli.ts polling")) {
+      const race = cmd.match(/--race\s+"([^"]+)"/)?.[1] || "";
+      return { detail: `Polling data: ${race}`, toolName: "polling", toolCategory: "fetcher" };
+    }
+    return { detail: `Running: ${cmd.slice(0, 80)}`, toolName: "Bash", toolCategory: "bash" };
+  }
+  return { detail: `Using ${toolName}...`, toolName, toolCategory: "thinking" };
+}
+
 async function runAgent(
   model: "haiku" | "sonnet" | "opus",
   prompt: string,
   allowedTools: string[] = ["WebSearch", "Bash"],
-  onProgress?: (detail: string) => void,
+  onProgress?: (progress: ToolProgress) => void,
+  signal?: AbortSignal,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const args = [
@@ -75,15 +118,7 @@ async function runAgent(
               if (block.type === "tool_use" && onProgress) {
                 const toolName = block.name || "tool";
                 const input = block.input || {};
-                // Summarize tool calls for the UI
-                if (toolName === "WebSearch" || toolName === "web_search") {
-                  onProgress(`Searching: ${input.query || "..."}`);
-                } else if (toolName === "Bash") {
-                  const cmd = (input.command || "").slice(0, 80);
-                  onProgress(`Running: ${cmd}`);
-                } else {
-                  onProgress(`Using ${toolName}...`);
-                }
+                onProgress(classifyTool(toolName, input));
               }
             }
           }
@@ -116,6 +151,18 @@ async function runAgent(
       reject(new Error(`Failed to spawn claude: ${err.message}`));
     });
 
+    // Kill subprocess if cancelled
+    if (signal) {
+      if (signal.aborted) {
+        proc.kill();
+        reject(new Error("Cancelled"));
+        return;
+      }
+      signal.addEventListener("abort", () => {
+        proc.kill();
+      });
+    }
+
     proc.stdin.write(prompt);
     proc.stdin.end();
   });
@@ -129,12 +176,16 @@ export class PipelineRun {
   events: PipelineEvent[] = [];
   reportContent: string | null = null;
   private listeners: ((event: PipelineEvent | null) => void)[] = [];
-  private cancelled = false;
+  private abortController = new AbortController();
   private running = false;
 
   constructor(ticker: string) {
     this.runId = Math.random().toString(36).slice(2, 14);
     this.ticker = ticker;
+  }
+
+  get cancelled() {
+    return this.abortController.signal.aborted;
   }
 
   private emit(event: PipelineEvent) {
@@ -150,12 +201,19 @@ export class PipelineRun {
     this.emit({ kind: "stage", stage, status, ...extra });
   }
 
-  private emitProgress(stage: PipelineStage, detail: string) {
-    this.emit({ kind: "progress", stage, detail } as ProgressEvent);
+  private emitProgress(stage: PipelineStage, progress: ToolProgress) {
+    this.emit({
+      kind: "progress",
+      stage,
+      detail: progress.detail,
+      toolName: progress.toolName,
+      toolCategory: progress.toolCategory,
+      timestamp: Date.now(),
+    } as ProgressEvent);
   }
 
   private progressCallback(stage: PipelineStage) {
-    return (detail: string) => this.emitProgress(stage, detail);
+    return (progress: ToolProgress) => this.emitProgress(stage, progress);
   }
 
   subscribe(fn: (event: PipelineEvent | null) => void): () => void {
@@ -166,7 +224,7 @@ export class PipelineRun {
   }
 
   cancel() {
-    this.cancelled = true;
+    this.abortController.abort();
   }
 
   isRunning() {
@@ -240,7 +298,8 @@ export class PipelineRun {
         ? prompts.evidenceEvent(title, closeDate, resolutionCriteria, outcomesText)
         : prompts.evidenceBinary(title, resolutionCriteria, closeDate, yesPrice);
 
-      const evidenceOutput = await runAgent("haiku", evidencePrompt, ["WebSearch", "Bash"], this.progressCallback("evidence"));
+      const signal = this.abortController.signal;
+      const evidenceOutput = await runAgent("haiku", evidencePrompt, ["WebSearch", "Bash"], this.progressCallback("evidence"), signal);
       this.emitStage("evidence", "complete", {
         durationS: (Date.now() - t1) / 1000,
       });
@@ -257,7 +316,7 @@ export class PipelineRun {
         ? prompts.devilsAdvocateEvent(title, closeDate, outcomesText, evidenceOutput, sourcesPool)
         : prompts.devilsAdvocateBinary(title, resolutionCriteria, closeDate, yesPrice, evidenceOutput, sourcesPool);
 
-      const daOutput = await runAgent("haiku", daPrompt, ["WebSearch", "Bash"], this.progressCallback("devil_advocate"));
+      const daOutput = await runAgent("haiku", daPrompt, ["WebSearch", "Bash"], this.progressCallback("devil_advocate"), signal);
       this.emitStage("devil_advocate", "complete", {
         durationS: (Date.now() - t2) / 1000,
       });
@@ -278,8 +337,8 @@ export class PipelineRun {
         : prompts.chaosBinary(title, resolutionCriteria, closeDate, yesPrice, evidenceOutput, daOutput);
 
       const [resolutionOutput, chaosOutput] = await Promise.all([
-        runAgent("sonnet", resolutionPrompt, ["WebSearch"], this.progressCallback("resolution")),
-        runAgent("haiku", chaosPrompt, ["WebSearch"], this.progressCallback("chaos")),
+        runAgent("sonnet", resolutionPrompt, ["WebSearch"], this.progressCallback("resolution"), signal),
+        runAgent("haiku", chaosPrompt, ["WebSearch"], this.progressCallback("chaos"), signal),
       ]);
 
       const elapsed3 = (Date.now() - t3) / 1000;
@@ -295,7 +354,7 @@ export class PipelineRun {
         ? prompts.calibratorEvent(title, closeDate, outcomesText, subText, volume, evidenceOutput, daOutput, resolutionOutput, chaosOutput)
         : prompts.calibratorBinary(title, resolutionCriteria, closeDate, yesPrice, volume, evidenceOutput, daOutput, resolutionOutput, chaosOutput);
 
-      const calibratorOutput = await runAgent("sonnet", calibratorPrompt, [], this.progressCallback("calibrator"));
+      const calibratorOutput = await runAgent("sonnet", calibratorPrompt, [], this.progressCallback("calibrator"), signal);
       this.emitStage("calibrator", "complete", {
         durationS: (Date.now() - t4) / 1000,
       });
@@ -321,7 +380,17 @@ export class PipelineRun {
         reportPath,
       } as CompleteEvent);
     } catch (err) {
-      this.emitStage("fetch", "error", {
+      if (this.cancelled) {
+        // Don't emit error for intentional cancellation
+        return;
+      }
+      // Find the running stage and mark it as error
+      const runningStage = (["fetch", "evidence", "devil_advocate", "resolution", "chaos", "calibrator"] as PipelineStage[])
+        .find((s) => {
+          const ev = this.events.findLast((e) => e.kind === "stage" && (e as StageEvent).stage === s);
+          return ev && (ev as StageEvent).status === "running";
+        });
+      this.emitStage(runningStage || "fetch", "error", {
         detail: err instanceof Error ? err.message : String(err),
       });
     } finally {
