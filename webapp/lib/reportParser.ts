@@ -19,6 +19,16 @@ export interface RankingEntry {
   grouped?: boolean;
 }
 
+export interface ParsedBet {
+  market: string;
+  direction: "YES" | "NO";
+  amount: number;       // dollars wagered
+  price: number;        // entry price as decimal (0-1)
+  contracts: number;    // number of contracts
+  payout: number;       // total payout if bet wins ($1 per contract)
+  profit: number;       // payout - amount
+}
+
 export interface ParsedReport {
   // Header
   title: string;
@@ -52,6 +62,9 @@ export interface ParsedReport {
   crossMarket: string | null;
   bettingRecommendation: string | null;
   probabilityMethodology: string | null;
+
+  // Parsed bet positions
+  bets: ParsedBet[];
 
   // Sub-agent raw outputs
   evidenceAgent: string | null;
@@ -314,6 +327,7 @@ export function parseReport(raw: string): ParsedReport {
     analystNotes,
     crossMarket,
     bettingRecommendation: bettingRec,
+    bets: parseBets(bettingRec),
     probabilityMethodology: methodology,
     evidenceAgent: evidenceSection,
     devilsAdvocate: daSection,
@@ -370,6 +384,73 @@ function mergeSourceLists(keySources: SourceEntry[], poolSources: SourceEntry[])
   }
 
   return merged;
+}
+
+/**
+ * Parse betting positions from the recommendation text.
+ * Handles both formats:
+ * - Binary: "**NO — $6 at 21 cents per contract (~29 contracts)**"
+ * - Event table: "| Tulsi Gabbard | NO | $18 | 41% YES | 25% | ... |"
+ */
+export function parseBets(text: string | null): ParsedBet[] {
+  if (!text) return [];
+  const bets: ParsedBet[] = [];
+
+  // Try table format first (event markets)
+  const tableLines = text.split("\n").filter((l) => l.includes("|") && !l.match(/^[\s|:-]+$/));
+  const dataLines = tableLines.filter((l) => !l.toLowerCase().includes("market") || l.toLowerCase().includes("yes"));
+
+  // Check if we have a markdown table with Direction/Amount columns
+  const headerLine = tableLines.find((l) => /direction/i.test(l) && /amount/i.test(l));
+  if (headerLine) {
+    const headers = headerLine.split("|").map((h) => h.trim().toLowerCase()).filter(Boolean);
+    const marketIdx = headers.findIndex((h) => h === "market");
+    const dirIdx = headers.findIndex((h) => h === "direction");
+    const amountIdx = headers.findIndex((h) => h === "amount");
+    const priceIdx = headers.findIndex((h) => h.includes("market price") || h.includes("price"));
+
+    for (const line of tableLines) {
+      if (line === headerLine) continue;
+      if (/^[\s|:-]+$/.test(line)) continue;
+
+      const cells = line.split("|").map((c) => c.trim()).filter(Boolean);
+      if (cells.length < Math.max(marketIdx, dirIdx, amountIdx, priceIdx) + 1) continue;
+
+      const market = cells[marketIdx] || "";
+      const direction = (cells[dirIdx] || "").toUpperCase().includes("YES") ? "YES" as const : "NO" as const;
+      const amountMatch = (cells[amountIdx] || "").match(/\$?(\d+(?:\.\d+)?)/);
+      const amount = amountMatch ? parseFloat(amountMatch[1]) : 0;
+      const priceMatch = (cells[priceIdx] || "").match(/(\d+(?:\.\d+)?)\s*%/);
+      const yesPrice = priceMatch ? parseFloat(priceMatch[1]) / 100 : 0;
+
+      if (!amount || !yesPrice) continue;
+
+      const price = direction === "YES" ? yesPrice : 1 - yesPrice;
+      const contracts = price > 0 ? amount / price : 0;
+      const payout = contracts; // $1 per contract
+      const profit = payout - amount;
+
+      bets.push({ market, direction, amount, price, contracts, payout, profit });
+    }
+
+    if (bets.length > 0) return bets;
+  }
+
+  // Try binary format: "**NO — $6 at 21 cents per contract (~29 contracts)**"
+  const binaryMatch = text.match(/\*\*(YES|NO)\s*[—–-]\s*\$(\d+(?:\.\d+)?)\s+at\s+(\d+(?:\.\d+)?)\s*cents?\s+per\s+contract\s*\(~?(\d+)\s*contracts?\)/i);
+  if (binaryMatch) {
+    const direction = binaryMatch[1].toUpperCase() as "YES" | "NO";
+    const amount = parseFloat(binaryMatch[2]);
+    const priceInCents = parseFloat(binaryMatch[3]);
+    const contracts = parseInt(binaryMatch[4]);
+    const price = priceInCents / 100;
+    const payout = contracts; // $1 per contract
+    const profit = payout - amount;
+
+    bets.push({ market: "This market", direction, amount, price, contracts, payout, profit });
+  }
+
+  return bets;
 }
 
 function extractLabeledBlock(text: string, label: string): string | null {

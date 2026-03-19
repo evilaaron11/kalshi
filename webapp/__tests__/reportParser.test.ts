@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseReport } from "../lib/reportParser";
+import { parseReport, parseBets } from "../lib/reportParser";
 
 const SAMPLE_BINARY_REPORT = `# Analysis: Will there be a government shutdown?
 Generated: 2026-03-18T15:00:00Z
@@ -414,6 +414,70 @@ Chaos.`);
 
     const nasa = report.keySources.find((s) => s.title.includes("NASA"));
     expect(nasa?.url).toBe("https://nasa.gov/temp");
+  });
+});
+
+describe("parseBets — binary format", () => {
+  it("parses binary bet with cents and contracts", () => {
+    const text = `**NO — $6 at 21 cents per contract (~29 contracts)**
+- True p(NO) ≈ 31%
+- Thesis: something`;
+    const bets = parseBets(text);
+    expect(bets).toHaveLength(1);
+    expect(bets[0].direction).toBe("NO");
+    expect(bets[0].amount).toBe(6);
+    expect(bets[0].contracts).toBe(29);
+    expect(bets[0].price).toBeCloseTo(0.21);
+    expect(bets[0].payout).toBe(29);
+    expect(bets[0].profit).toBe(23);
+  });
+});
+
+describe("parseBets — table format", () => {
+  it("parses event betting table", () => {
+    const text = `All positions are NO.
+
+| Market | Direction | Amount | Market Price | Estimate | Thesis |
+|---|---|---|---|---|---|
+| Tulsi Gabbard | NO | $18 | 41% YES | 25% | Loyal appointee |
+| Kash Patel | NO | $17 | 41% YES | 26% | Mirror image |
+| Pam Bondi | YES | $5 | 49% YES | 53% | Institutional pressure |`;
+    const bets = parseBets(text);
+    expect(bets).toHaveLength(3);
+
+    // Gabbard: NO at 41% YES = buying NO at 59 cents
+    expect(bets[0].market).toBe("Tulsi Gabbard");
+    expect(bets[0].direction).toBe("NO");
+    expect(bets[0].amount).toBe(18);
+    expect(bets[0].price).toBeCloseTo(0.59);
+    expect(bets[0].contracts).toBeCloseTo(18 / 0.59, 0);
+    expect(bets[0].profit).toBeCloseTo(bets[0].payout - 18, 0);
+
+    // Bondi: YES at 49 cents
+    expect(bets[2].direction).toBe("YES");
+    expect(bets[2].price).toBeCloseTo(0.49);
+  });
+
+  it("calculates correct total payout", () => {
+    const text = `| Market | Direction | Amount | Market Price | Estimate | Thesis |
+|---|---|---|---|---|---|
+| A | NO | $50 | 30% YES | 20% | test |
+| B | YES | $50 | 40% YES | 50% | test |`;
+    const bets = parseBets(text);
+    const totalWagered = bets.reduce((s, b) => s + b.amount, 0);
+    const totalPayout = bets.reduce((s, b) => s + b.payout, 0);
+    expect(totalWagered).toBe(100);
+    // A: 50 / 0.70 = ~71 contracts, payout $71
+    // B: 50 / 0.40 = 125 contracts, payout $125
+    expect(totalPayout).toBeGreaterThan(totalWagered);
+  });
+
+  it("returns empty for null input", () => {
+    expect(parseBets(null)).toEqual([]);
+  });
+
+  it("returns empty for text with no recognizable bets", () => {
+    expect(parseBets("Just some general text")).toEqual([]);
   });
 });
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ParsedReport, RankingEntry } from "@/lib/reportParser";
+import type { ParsedReport, RankingEntry, ParsedBet } from "@/lib/reportParser";
 import ReportSection from "./ReportSection";
 import RichText from "./RichText";
 import { parseBulletBlock } from "@/lib/richTextUtils";
@@ -245,6 +245,66 @@ function PreBlock({ text }: { text: string }) {
   );
 }
 
+function PayoutSummary({ bets }: { bets: ParsedBet[] }) {
+  const totalWagered = bets.reduce((s, b) => s + b.amount, 0);
+  const totalPayout = bets.reduce((s, b) => s + b.payout, 0);
+  const totalProfit = totalPayout - totalWagered;
+  const roi = totalWagered > 0 ? (totalProfit / totalWagered) * 100 : 0;
+
+  return (
+    <div className="mt-3 pt-3 border-t border-neutral-800">
+      <div className="text-xs text-neutral-500 uppercase tracking-wide mb-2">
+        If all bets win
+      </div>
+      <div className="grid grid-cols-4 gap-3">
+        <div>
+          <div className="text-lg font-bold text-neutral-300 tabular-nums">
+            ${totalWagered.toFixed(0)}
+          </div>
+          <div className="text-xs text-neutral-500">Wagered</div>
+        </div>
+        <div>
+          <div className="text-lg font-bold text-neutral-200 tabular-nums">
+            ${totalPayout.toFixed(0)}
+          </div>
+          <div className="text-xs text-neutral-500">Payout</div>
+        </div>
+        <div>
+          <div className="text-lg font-bold text-green-400 tabular-nums">
+            +${totalProfit.toFixed(0)}
+          </div>
+          <div className="text-xs text-neutral-500">Profit</div>
+        </div>
+        <div>
+          <div className="text-lg font-bold text-green-400 tabular-nums">
+            {roi.toFixed(0)}%
+          </div>
+          <div className="text-xs text-neutral-500">ROI</div>
+        </div>
+      </div>
+      {bets.length > 1 && (
+        <div className="mt-2 space-y-1">
+          {bets.map((b, i) => (
+            <div key={i} className="flex items-center justify-between text-xs">
+              <span className="text-neutral-400 truncate max-w-[50%]">
+                <span className={b.direction === "YES" ? "text-green-500" : "text-red-500"}>
+                  {b.direction}
+                </span>
+                {" "}{b.market}
+              </span>
+              <span className="tabular-nums text-neutral-500">
+                ${b.amount.toFixed(0)} {"\u2192"}{" "}
+                <span className="text-green-400">${b.payout.toFixed(0)}</span>
+                {" "}(+${b.profit.toFixed(0)})
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ReportViewer({ report }: Props) {
   const isEvent = report.rankings.length > 0;
   const [showAllRankings, setShowAllRankings] = useState(false);
@@ -386,6 +446,7 @@ export default function ReportViewer({ report }: Props) {
       {report.bettingRecommendation && (
         <ReportSection title="Betting Recommendation" badge="$100" badgeColor="bg-emerald-900/50">
           <SmartBlock text={report.bettingRecommendation} />
+          {report.bets.length > 0 && <PayoutSummary bets={report.bets} />}
         </ReportSection>
       )}
 
