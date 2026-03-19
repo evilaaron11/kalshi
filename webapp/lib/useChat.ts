@@ -19,7 +19,7 @@ export function useChat() {
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  const send = useCallback(async (text: string, ticker: string) => {
+  const send = useCallback(async (text: string, tickers: string[]) => {
     const userMsg: ChatMessage = { role: "user", content: text };
     const newMessages = [...messages, userMsg];
 
@@ -33,7 +33,7 @@ export function useChat() {
       const resp = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: newMessages, ticker }),
+        body: JSON.stringify({ messages: newMessages, tickers }),
         signal: abortRef.current.signal,
       });
 

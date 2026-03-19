@@ -7,7 +7,7 @@ interface ChatMessage {
   content: string;
 }
 
-function loadLatestReport(ticker: string): string | null {
+function loadLatestReport(ticker: string): { ticker: string; content: string } | null {
   const resultsDir = path.resolve(process.cwd(), "..", "results");
   if (!fs.existsSync(resultsDir)) return null;
 
@@ -18,49 +18,60 @@ function loadLatestReport(ticker: string): string | null {
     .reverse();
 
   if (files.length === 0) return null;
-  return fs.readFileSync(path.join(resultsDir, files[0]), "utf-8");
+  return {
+    ticker,
+    content: fs.readFileSync(path.join(resultsDir, files[0]), "utf-8"),
+  };
 }
 
-function buildPrompt(reportText: string, messages: ChatMessage[]): string {
+function buildPrompt(reports: { ticker: string; content: string }[], messages: ChatMessage[]): string {
+  const reportsBlock = reports.map((r) =>
+    `<report ticker="${r.ticker}">\n${r.content}\n</report>`
+  ).join("\n\n");
+
   const history = messages.slice(0, -1).map((m) =>
     `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`
   ).join("\n\n");
 
   const latest = messages[messages.length - 1];
 
-  return `You are a helpful analyst assistant. The user is viewing a prediction market analysis report and has questions about it.
+  return `You are a helpful analyst assistant. The user is viewing prediction market analysis reports and has questions about them.
 
-<report>
-${reportText}
-</report>
+${reports.length === 1 ? "Here is the analysis report:" : `Here are ${reports.length} analysis reports:`}
+
+${reportsBlock}
 
 ${history ? `Previous conversation:\n${history}\n\n` : ""}User: ${latest.content}
 
-Answer concisely based on the report. Reference specific data, probabilities, and reasoning from the report when relevant. If the user asks about something not covered in the report, say so.`;
+Answer concisely based on the reports. Reference specific data, probabilities, and reasoning when relevant. If the user asks about a specific market, find it by name or ticker. If the user asks about something not covered, say so.`;
 }
 
 export async function POST(request: Request) {
-  const { messages, ticker } = (await request.json()) as {
+  const { messages, tickers } = (await request.json()) as {
     messages: ChatMessage[];
-    ticker: string;
+    tickers: string[];
   };
 
-  if (!messages?.length || !ticker) {
-    return new Response(JSON.stringify({ error: "messages and ticker required" }), {
+  if (!messages?.length || !tickers?.length) {
+    return new Response(JSON.stringify({ error: "messages and tickers required" }), {
       status: 400,
       headers: { "Content-Type": "application/json" },
     });
   }
 
-  const reportText = loadLatestReport(ticker);
-  if (!reportText) {
-    return new Response(JSON.stringify({ error: "No report found for this ticker" }), {
+  // Load all available reports
+  const reports = tickers
+    .map((t) => loadLatestReport(t))
+    .filter((r): r is { ticker: string; content: string } => r !== null);
+
+  if (reports.length === 0) {
+    return new Response(JSON.stringify({ error: "No reports found. Run an analysis first." }), {
       status: 404,
       headers: { "Content-Type": "application/json" },
     });
   }
 
-  const prompt = buildPrompt(reportText, messages);
+  const prompt = buildPrompt(reports, messages);
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -96,7 +107,6 @@ export async function POST(request: Request) {
           try {
             const event = JSON.parse(line);
 
-            // Extract text content from assistant message blocks
             if (event.type === "assistant" && event.message?.content) {
               for (const block of event.message.content) {
                 if (block.type === "text" && block.text) {
@@ -107,7 +117,6 @@ export async function POST(request: Request) {
               }
             }
 
-            // Final result
             if (event.type === "result" && event.result) {
               controller.enqueue(
                 encoder.encode(`data: ${JSON.stringify({ type: "done", text: event.result })}\n\n`)
@@ -131,7 +140,6 @@ export async function POST(request: Request) {
         controller.close();
       });
 
-      // Handle client disconnect
       request.signal.addEventListener("abort", () => {
         proc.kill();
       });
