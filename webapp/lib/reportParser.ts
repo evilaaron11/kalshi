@@ -407,7 +407,8 @@ export function parseBets(text: string | null): ParsedBet[] {
     const marketIdx = headers.findIndex((h) => h === "market");
     const dirIdx = headers.findIndex((h) => h === "direction");
     const amountIdx = headers.findIndex((h) => h === "amount");
-    const priceIdx = headers.findIndex((h) => h.includes("market price") || h.includes("price"));
+    // Accept "Market Price", "Entry Price", or just "Price"
+    const priceIdx = headers.findIndex((h) => h.includes("price"));
 
     for (const line of tableLines) {
       if (line === headerLine) continue;
@@ -416,35 +417,55 @@ export function parseBets(text: string | null): ParsedBet[] {
       const cells = line.split("|").map((c) => c.trim()).filter(Boolean);
       if (cells.length < Math.max(marketIdx, dirIdx, amountIdx, priceIdx) + 1) continue;
 
-      const market = cells[marketIdx] || "";
-      const direction = (cells[dirIdx] || "").toUpperCase().includes("YES") ? "YES" as const : "NO" as const;
+      const market = cells[marketIdx]?.replace(/\*\*/g, "") || "";
+      // Strip bold markers from direction cell too
+      const dirCell = (cells[dirIdx] || "").replace(/\*\*/g, "").trim().toUpperCase();
+      const direction = dirCell.includes("YES") ? "YES" as const : "NO" as const;
       const amountMatch = (cells[amountIdx] || "").match(/\$?(\d+(?:\.\d+)?)/);
       const amount = amountMatch ? parseFloat(amountMatch[1]) : 0;
-      const priceMatch = (cells[priceIdx] || "").match(/(\d+(?:\.\d+)?)\s*%/);
-      const yesPrice = priceMatch ? parseFloat(priceMatch[1]) / 100 : 0;
 
-      if (!amount || !yesPrice) continue;
+      // Parse price — handle "41% YES", "~$0.62", "$0.59", "59%"
+      const priceCell = cells[priceIdx] || "";
+      let entryPrice = 0;
 
-      const price = direction === "YES" ? yesPrice : 1 - yesPrice;
-      const contracts = price > 0 ? amount / price : 0;
+      const pctMatch = priceCell.match(/(\d+(?:\.\d+)?)\s*%/);
+      const dollarMatch = priceCell.match(/~?\$?(\d+\.\d+)/);
+
+      if (pctMatch) {
+        // "41% YES" → yesPrice = 0.41, entry price depends on direction
+        const yesPrice = parseFloat(pctMatch[1]) / 100;
+        entryPrice = direction === "YES" ? yesPrice : 1 - yesPrice;
+      } else if (dollarMatch) {
+        // "~$0.62" → direct entry price
+        entryPrice = parseFloat(dollarMatch[1]);
+      }
+
+      if (!amount || !entryPrice) continue;
+
+      const contracts = amount / entryPrice;
       const payout = contracts; // $1 per contract
       const profit = payout - amount;
 
-      bets.push({ market, direction, amount, price, contracts, payout, profit });
+      bets.push({ market, direction, amount, price: entryPrice, contracts, payout, profit });
     }
 
     if (bets.length > 0) return bets;
   }
 
-  // Try binary format: "**NO — $6 at 21 cents per contract (~29 contracts)**"
-  const binaryMatch = text.match(/\*\*(YES|NO)\s*[—–-]\s*\$(\d+(?:\.\d+)?)\s+at\s+(\d+(?:\.\d+)?)\s*cents?\s+per\s+contract\s*\(~?(\d+)\s*contracts?\)/i);
+  // Try binary format variations:
+  // "**NO — $6 at 21 cents per contract (~29 contracts)**"
+  // "**NO, $16 at 89 cents**"
+  // "**YES — $10 at 35 cents per contract (~28 contracts)**"
+  const binaryMatch = text.match(
+    /\*\*(YES|NO)\s*[,—–-]\s*\$(\d+(?:\.\d+)?)\s+at\s+(\d+(?:\.\d+)?)\s*cents?(?:\s+per\s+contract)?\s*(?:\(~?(\d+)\s*contracts?\))?\*\*/i
+  );
   if (binaryMatch) {
     const direction = binaryMatch[1].toUpperCase() as "YES" | "NO";
     const amount = parseFloat(binaryMatch[2]);
     const priceInCents = parseFloat(binaryMatch[3]);
-    const contracts = parseInt(binaryMatch[4]);
     const price = priceInCents / 100;
-    const payout = contracts; // $1 per contract
+    const contracts = binaryMatch[4] ? parseInt(binaryMatch[4]) : Math.floor(amount / price);
+    const payout = contracts;
     const profit = payout - amount;
 
     bets.push({ market: "This market", direction, amount, price, contracts, payout, profit });

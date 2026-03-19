@@ -479,6 +479,31 @@ describe("parseBets — table format", () => {
   it("returns empty for text with no recognizable bets", () => {
     expect(parseBets("Just some general text")).toEqual([]);
   });
+
+  it("parses table with Entry Price column and bold direction", () => {
+    const text = `| Market | Direction | Amount | Entry Price | Thesis |
+|---|---|---|---|---|
+| Kash Patel | **NO** | $28 | ~$0.62 | Core loyalist |
+| Tom Homan | **YES** | $5 | ~$0.15 | Promotion scenario |`;
+    const bets = parseBets(text);
+    expect(bets).toHaveLength(2);
+    expect(bets[0].market).toBe("Kash Patel");
+    expect(bets[0].direction).toBe("NO");
+    expect(bets[0].price).toBeCloseTo(0.62);
+    expect(bets[1].direction).toBe("YES");
+    expect(bets[1].price).toBeCloseTo(0.15);
+  });
+
+  it("parses binary format with comma separator", () => {
+    const text = `**NO, $16 at 89 cents**
+- Position: Buy NO contracts`;
+    const bets = parseBets(text);
+    expect(bets).toHaveLength(1);
+    expect(bets[0].direction).toBe("NO");
+    expect(bets[0].amount).toBe(16);
+    expect(bets[0].price).toBeCloseTo(0.89);
+    expect(bets[0].contracts).toBe(17); // floor(16/0.89)
+  });
 });
 
 describe("parseReport — edge cases", () => {
