@@ -1,5 +1,6 @@
 # Secrets and credentials
 .env
+.env.local
 *.pem
 *.pem.txt
 *_private*
@@ -7,6 +8,11 @@
 # Claude session data (exclude everything except commands/skills)
 .claude/*
 !.claude/commands/
+
+# Node
+node_modules/
+.next/
+out/
 
 # Python
 __pycache__/

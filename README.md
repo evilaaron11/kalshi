@@ -202,7 +202,6 @@ Available as both a **web app** (Next.js dashboard with real-time SSE progress) 
 ### File Structure
 
 ```
-webapp/
 ├── app/                         Pages & API routes
 │   ├── page.tsx                 Dashboard
 │   └── api/
@@ -236,9 +235,14 @@ webapp/
 │   ├── types.ts                 TypeScript definitions
 │   ├── useAnalysis.ts           SSE hook for pipeline progress
 │   └── watchlist.ts             Watchlist persistence
-├── __tests__/                   Vitest test suite (84 tests)
+├── __tests__/                   Vitest test suite
 ├── data/watchlist.json          Saved watchlist tickers
-└── results/                     Analysis reports (markdown)
+├── results/                     Analysis reports (markdown)
+├── .env.local                   Environment variables
+├── package.json
+├── tsconfig.json
+├── next.config.ts
+└── postcss.config.mjs
 ```
 
 ## Pipeline
@@ -251,7 +255,7 @@ The analysis pipeline runs 4 subagents + 1 calibrator as Claude CLI subprocesses
 | 1 (seq) | Devil's Advocate | haiku | 5 | Contrarian case, extends sources |
 | 2 (par) | Resolution | sonnet | 1 | Criteria analysis, edge cases |
 | 2 (par) | Chaos | haiku | 1 | Tail risks (1-8% scenarios) |
-| 3 | Calibrator | sonnet | 0 | Synthesis, probability, bet sizing |
+| 3 | Calibrator | opus | 0 | Synthesis, probability, bet sizing |
 
 Supports both **single binary markets** and **multi-outcome events**.
 
@@ -270,7 +274,6 @@ Agents have access to specialized fetchers alongside web search. These don't cou
 Run fetchers directly:
 
 ```bash
-cd webapp
 npx tsx lib/fetchers/cli.ts cross-market --query "government shutdown"
 npx tsx lib/fetchers/cli.ts whitehouse --search "tariffs" --type eos --limit 5
 npx tsx lib/fetchers/cli.ts oira --search "EPA climate" --source fedreg
@@ -283,15 +286,14 @@ npx tsx lib/fetchers/cli.ts polling --race "Georgia Senate 2026"
 **Requirements:** Node.js 20+, [Claude Code](https://claude.ai/code) (Claude Pro/Max).
 
 ```bash
-cd webapp
 npm install
 ```
 
-Create `webapp/.env.local`:
+Create `.env.local` (see `.env.example` for all options):
 
 ```
 KALSHI_API_KEY=your_api_key
-KALSHI_PRIVATE_KEY_PATH=../kalshi_private.pem
+KALSHI_PRIVATE_KEY_PATH=./kalshi_private.pem.txt
 ```
 
 Place your Kalshi RSA private key at the path specified above.
@@ -301,7 +303,6 @@ Place your Kalshi RSA private key at the path specified above.
 ### Web App
 
 ```bash
-cd webapp
 npm run dev
 ```
 
@@ -318,7 +319,6 @@ From Claude Code inside the project directory:
 ### Tests
 
 ```bash
-cd webapp
 npm test
 ```
 

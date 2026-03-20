@@ -9,6 +9,12 @@ import ProgressStepper from "./ProgressStepper";
 import OutcomeBar from "./OutcomeBar";
 import ReportViewer from "./ReportViewer";
 
+interface ReportEntry {
+  filename: string;
+  date: string;
+  time: string;
+}
+
 interface Props {
   market: MarketSummary;
   runState: RunState | null;
@@ -33,6 +39,8 @@ export default function MarketCard({
   const [reportOpen, setReportOpen] = useState(false);
   const [loadingReport, setLoadingReport] = useState(false);
   const [hasReport, setHasReport] = useState(false);
+  const [reportHistory, setReportHistory] = useState<ReportEntry[]>([]);
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
 
   const slugify = (s: string) =>
     s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -40,12 +48,24 @@ export default function MarketCard({
   const titleSlug = slugify(market.eventTitle || market.title);
   const kalshiUrl = `https://kalshi.com/markets/${seriesLower}/${titleSlug}`;
 
-  // Load report metadata on mount (for showing estimate inline)
+  // Load report metadata + history on mount
   useEffect(() => {
+    fetch(`/api/markets/${market.ticker}/report?all=true`)
+      .then(async (r) => {
+        if (r.ok) {
+          const entries: ReportEntry[] = await r.json();
+          if (entries.length > 0) {
+            setHasReport(true);
+            setReportHistory(entries);
+            setSelectedFile(entries[0].filename);
+          }
+        }
+      })
+      .catch(() => {});
+    // Also load the latest report content for inline estimate display
     fetch(`/api/markets/${market.ticker}/report`)
       .then(async (r) => {
         if (r.ok) {
-          setHasReport(true);
           const raw = await r.text();
           setParsedReport(parseReport(raw));
         }
@@ -65,8 +85,35 @@ export default function MarketCard({
           }
         })
         .catch(() => {});
+      // Refresh history list
+      fetch(`/api/markets/${market.ticker}/report?all=true`)
+        .then(async (r) => {
+          if (r.ok) {
+            const entries: ReportEntry[] = await r.json();
+            if (entries.length > 0) {
+              setReportHistory(entries);
+              setSelectedFile(entries[0].filename);
+            }
+          }
+        })
+        .catch(() => {});
     }
-  }, [isComplete, runState?.runId]);
+  }, [isComplete, runState?.runId, market.ticker]);
+
+  const loadReport = (filename: string) => {
+    setLoadingReport(true);
+    fetch(`/api/markets/${market.ticker}/report?file=${encodeURIComponent(filename)}`)
+      .then(async (r) => {
+        if (r.ok) {
+          const raw = await r.text();
+          setParsedReport(parseReport(raw));
+          setSelectedFile(filename);
+          setReportOpen(true);
+          onReportToggle?.(true);
+        }
+      })
+      .finally(() => setLoadingReport(false));
+  };
 
   const handleViewReport = () => {
     if (reportOpen) {
@@ -79,7 +126,7 @@ export default function MarketCard({
       onReportToggle?.(true);
       return;
     }
-    // Shouldn't happen since we load on mount, but fallback
+    // Fallback: load latest
     setLoadingReport(true);
     fetch(`/api/markets/${market.ticker}/report`)
       .then(async (r) => {
@@ -207,6 +254,28 @@ export default function MarketCard({
       {/* Error */}
       {runState?.error && (
         <div className="text-xs text-red-400 mb-3">{runState.error}</div>
+      )}
+
+      {/* Report history selector */}
+      {reportOpen && reportHistory.length > 1 && (
+        <div className="flex items-center gap-2 mb-2 text-xs">
+          <span className="text-neutral-500">Report:</span>
+          <select
+            value={selectedFile || ""}
+            onChange={(e) => loadReport(e.target.value)}
+            className="bg-neutral-800 text-neutral-300 border border-neutral-700 rounded px-2 py-0.5 text-xs"
+          >
+            {reportHistory.map((entry) => (
+              <option key={entry.filename} value={entry.filename}>
+                {entry.date} {entry.time}
+                {entry.filename === reportHistory[0].filename ? " (latest)" : ""}
+              </option>
+            ))}
+          </select>
+          <span className="text-neutral-600">
+            {reportHistory.length} report{reportHistory.length !== 1 ? "s" : ""}
+          </span>
+        </div>
       )}
 
       {/* Report viewer */}

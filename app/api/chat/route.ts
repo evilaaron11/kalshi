@@ -8,7 +8,7 @@ interface ChatMessage {
 }
 
 function loadLatestReport(ticker: string): { ticker: string; content: string } | null {
-  const resultsDir = path.resolve(process.cwd(), "..", "results");
+  const resultsDir = path.resolve(process.cwd(), "results");
   if (!fs.existsSync(resultsDir)) return null;
 
   const files = fs
@@ -78,6 +78,7 @@ export async function POST(request: Request) {
     start(controller) {
       const args = [
         "-p",
+        "--verbose",
         "--model", "sonnet",
         "--output-format", "stream-json",
         "--no-session-persistence",
@@ -90,7 +91,7 @@ export async function POST(request: Request) {
 
       const proc = spawn("claude", args, {
         stdio: ["pipe", "pipe", "pipe"],
-        cwd: path.resolve(process.cwd(), ".."),
+        cwd: process.cwd(),
         env,
         shell: true,
       });

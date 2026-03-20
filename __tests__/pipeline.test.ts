@@ -54,7 +54,7 @@ describe("classifyTool", () => {
 
   it("classifies cross-market fetcher", () => {
     const result = classifyTool("Bash", {
-      command: 'cd webapp && npx tsx lib/fetchers/cli.ts cross-market --query "shutdown"',
+      command: 'npx tsx lib/fetchers/cli.ts cross-market --query "shutdown"',
     });
     expect(result.toolCategory).toBe("fetcher");
     expect(result.toolName).toBe("cross-market");
@@ -63,7 +63,7 @@ describe("classifyTool", () => {
 
   it("classifies whitehouse fetcher", () => {
     const result = classifyTool("Bash", {
-      command: 'cd webapp && npx tsx lib/fetchers/cli.ts whitehouse --search "tariff" --type eos',
+      command: 'npx tsx lib/fetchers/cli.ts whitehouse --search "tariff" --type eos',
     });
     expect(result.toolCategory).toBe("fetcher");
     expect(result.toolName).toBe("whitehouse");
@@ -72,7 +72,7 @@ describe("classifyTool", () => {
 
   it("classifies oira fetcher", () => {
     const result = classifyTool("Bash", {
-      command: 'cd webapp && npx tsx lib/fetchers/cli.ts oira --search "EPA climate"',
+      command: 'npx tsx lib/fetchers/cli.ts oira --search "EPA climate"',
     });
     expect(result.toolCategory).toBe("fetcher");
     expect(result.toolName).toBe("oira");
@@ -80,7 +80,7 @@ describe("classifyTool", () => {
 
   it("classifies fec fetcher with candidate", () => {
     const result = classifyTool("Bash", {
-      command: 'cd webapp && npx tsx lib/fetchers/cli.ts fec --candidate "Jon Ossoff"',
+      command: 'npx tsx lib/fetchers/cli.ts fec --candidate "Jon Ossoff"',
     });
     expect(result.toolCategory).toBe("fetcher");
     expect(result.toolName).toBe("fec");
@@ -89,7 +89,7 @@ describe("classifyTool", () => {
 
   it("classifies fec fetcher with committee", () => {
     const result = classifyTool("Bash", {
-      command: 'cd webapp && npx tsx lib/fetchers/cli.ts fec --committee "Save America"',
+      command: 'npx tsx lib/fetchers/cli.ts fec --committee "Save America"',
     });
     expect(result.toolCategory).toBe("fetcher");
     expect(result.detail).toContain("Save America");
@@ -97,7 +97,7 @@ describe("classifyTool", () => {
 
   it("classifies polling fetcher", () => {
     const result = classifyTool("Bash", {
-      command: 'cd webapp && npx tsx lib/fetchers/cli.ts polling --race "Georgia Senate"',
+      command: 'npx tsx lib/fetchers/cli.ts polling --race "Georgia Senate"',
     });
     expect(result.toolCategory).toBe("fetcher");
     expect(result.toolName).toBe("polling");

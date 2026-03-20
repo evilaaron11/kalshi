@@ -4,7 +4,7 @@
  * Called by Claude agents via Bash during pipeline runs.
  *
  * Usage (from project root):
- *   cd webapp && npx tsx lib/fetchers/cli.ts <command> [options]
+ *   npx tsx lib/fetchers/cli.ts <command> [options]
  *
  * Commands:
  *   cross-market --query "<keywords>"
@@ -23,10 +23,8 @@ import { fetchWhiteHouse } from "./whitehouse";
 import dotenv from "dotenv";
 import path from "path";
 
-// Load .env from project root (one level up from webapp/)
+// Load .env from project root
 dotenv.config({ path: path.resolve(__dirname, "../../.env") });
-// Also try webapp/.env.local
-dotenv.config({ path: path.resolve(__dirname, "../.env.local") });
 
 function parseArgs(argv: string[]): Record<string, string> {
   const args: Record<string, string> = {};

@@ -92,7 +92,7 @@ async function runAgent(
 
     const proc = spawn("claude", args, {
       stdio: ["pipe", "pipe", "pipe"],
-      cwd: path.resolve(process.cwd(), ".."),
+      cwd: process.cwd(),
       env,
       shell: true,
     });
@@ -354,7 +354,7 @@ export class PipelineRun {
         ? prompts.calibratorEvent(title, closeDate, outcomesText, subText, volume, evidenceOutput, daOutput, resolutionOutput, chaosOutput)
         : prompts.calibratorBinary(title, resolutionCriteria, closeDate, yesPrice, volume, evidenceOutput, daOutput, resolutionOutput, chaosOutput);
 
-      const calibratorOutput = await runAgent("sonnet", calibratorPrompt, [], this.progressCallback("calibrator"), signal);
+      const calibratorOutput = await runAgent("opus", calibratorPrompt, [], this.progressCallback("calibrator"), signal);
       this.emitStage("calibrator", "complete", {
         durationS: (Date.now() - t4) / 1000,
       });
@@ -370,7 +370,7 @@ export class PipelineRun {
         chaosOutput,
       );
       this.reportContent = fs.readFileSync(
-        path.resolve(process.cwd(), "..", reportPath),
+        path.resolve(process.cwd(), reportPath),
         "utf-8",
       );
 
@@ -416,7 +416,7 @@ function saveReport(
   resolution: string,
   chaos: string,
 ): string {
-  const projectRoot = path.resolve(process.cwd(), "..");
+  const projectRoot = process.cwd();
   const resultsDir = path.join(projectRoot, "results");
   if (!fs.existsSync(resultsDir)) fs.mkdirSync(resultsDir, { recursive: true });
 

@@ -78,7 +78,7 @@ The pipeline spawns Claude Code CLI agents as subprocesses using `--output-forma
 | devil_advocate | haiku  | evidence           | --            | WebSearch, Bash    |
 | resolution     | sonnet | devil_advocate     | chaos         | WebSearch          |
 | chaos          | haiku  | devil_advocate     | resolution    | WebSearch          |
-| calibrator     | sonnet | resolution + chaos | --            | (none)             |
+| calibrator     | opus   | resolution + chaos | --            | (none)             |
 
 Progress events from CLI stream-json output are parsed and forwarded to the frontend via SSE (tool use summaries like "Searching: ..." and "Running: ...").
 
@@ -139,7 +139,6 @@ The frontend checks for existing reports on mount via HEAD request and shows "Vi
 ## File Structure
 
 ```
-webapp/
 ├── app/
 │   ├── api/
 │   │   ├── markets/
@@ -176,6 +175,10 @@ webapp/
 ├── package.json
 ├── tsconfig.json
 ├── next.config.ts
+├── .env.local                   Environment variables
+├── package.json
+├── tsconfig.json
+├── next.config.ts
 └── postcss.config.mjs
 ```
 
@@ -207,6 +210,7 @@ webapp/
 | `KALSHI_API_KEY` | Kalshi RSA public key ID |
 | `KALSHI_PRIVATE_KEY_PATH` | Path to RSA private key .pem |
 | `FEC_API_KEY` | FEC data (optional, uses DEMO_KEY) |
+| `NEWS_API_KEY` | News API (optional) |
 | `METACULUS_TOKEN` | Metaculus API auth |
 
 ## Open Questions
