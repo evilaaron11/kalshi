@@ -51,7 +51,7 @@ export default function ProgressStepper({ stages, progressHistory }: Props) {
             color = "text-neutral-600";
           }
 
-          const isClickable = count > 0;
+          const isClickable = status === "complete" || status === "error" || count > 0;
 
           return (
             <span key={key} className="flex items-center gap-1">
@@ -81,14 +81,38 @@ export default function ProgressStepper({ stages, progressHistory }: Props) {
       </div>
 
       {/* Auto-expand running stages, manual expand completed ones */}
-      {STAGES.map(({ key }) => {
+      {STAGES.map(({ key, label }) => {
         const s = stages[key];
         const status = s?.status || "pending";
         const items = progressHistory[key] || [];
         const isRunning = status === "running";
         const show = isRunning || expandedStage === key;
 
-        if (!show || items.length === 0) return null;
+        if (!show) return null;
+
+        if (items.length === 0) {
+          // Completed or running stage with no events yet — show status message
+          const message = status === "error"
+            ? s?.detail || "Stage failed"
+            : status === "running"
+              ? key === "calibrator"
+                ? "Synthesizing all agent outputs..."
+                : `Running ${label.toLowerCase()} analysis...`
+              : key === "fetch"
+                ? "Market data fetched from Kalshi API"
+                : `${label} analysis complete`;
+          return (
+            <div key={key} className="mt-1.5 ml-4 border-l border-neutral-800 pl-3">
+              <div className={`text-xs ${
+                status === "error" ? "text-red-400" :
+                status === "running" ? "text-neutral-400 animate-pulse" :
+                "text-neutral-500"
+              }`}>
+                {message}
+              </div>
+            </div>
+          );
+        }
 
         return (
           <StageDetail key={key} items={items} isRunning={isRunning} />

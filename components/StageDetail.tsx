@@ -7,6 +7,7 @@ const CATEGORY_ICONS: Record<ToolCategory, string> = {
   fetcher: "\uD83D\uDCE1",  // satellite antenna
   bash: "\u2588\u2584",      // terminal block
   thinking: "\uD83E\uDDE0", // brain
+  reasoning: "\u270D\uFE0F", // writing hand
 };
 
 const CATEGORY_COLORS: Record<ToolCategory, string> = {
@@ -14,6 +15,7 @@ const CATEGORY_COLORS: Record<ToolCategory, string> = {
   fetcher: "text-amber-400",
   bash: "text-neutral-400",
   thinking: "text-purple-400",
+  reasoning: "text-emerald-400",
 };
 
 interface Props {
@@ -24,15 +26,36 @@ interface Props {
 export default function StageDetail({ items, isRunning }: Props) {
   if (items.length === 0) return null;
 
+  // Group consecutive reasoning items to avoid visual noise — show the latest
+  const displayed: (ProgressDetail & { isGrouped?: boolean })[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const next = items[i + 1];
+
+    // If this is reasoning and the next one is also reasoning, skip this one
+    // (unless this is the last item overall)
+    if (
+      item.toolCategory === "reasoning" &&
+      next?.toolCategory === "reasoning" &&
+      i < items.length - 1
+    ) {
+      continue;
+    }
+
+    displayed.push(item);
+  }
+
   return (
     <div className="mt-1.5 ml-4 space-y-0.5 border-l border-neutral-800 pl-3">
-      {items.map((item, i) => {
-        const isLatest = i === items.length - 1 && isRunning;
+      {displayed.map((item, i) => {
+        const isLatest = i === displayed.length - 1 && isRunning;
+        const isReasoning = item.toolCategory === "reasoning" || item.toolCategory === "thinking";
+
         return (
           <div
             key={`${item.timestamp}-${i}`}
             className={`flex items-start gap-1.5 text-xs leading-snug ${
-              isLatest ? "text-neutral-200" : "text-neutral-500"
+              isLatest ? "text-neutral-200" : isReasoning ? "text-neutral-500 italic" : "text-neutral-500"
             }`}
           >
             <span className={`flex-shrink-0 ${CATEGORY_COLORS[item.toolCategory]}`}>

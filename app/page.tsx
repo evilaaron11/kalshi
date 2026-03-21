@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { MarketSummary } from "@/lib/types";
 import { useAnalysis } from "@/lib/useAnalysis";
 import MarketCard from "@/components/MarketCard";
@@ -13,6 +13,8 @@ export default function Dashboard() {
   const [modalOpen, setModalOpen] = useState(false);
   const { runState, start, cancel, reset } = useAnalysis();
   const [activeTicker, setActiveTicker] = useState<string | null>(null);
+  const dragIdx = useRef<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
   const refresh = useCallback(async () => {
     try {
       const resp = await fetch("/api/markets");
@@ -41,6 +43,22 @@ export default function Dashboard() {
     await fetch(`/api/markets/${ticker}`, { method: "DELETE" });
     setMarkets((prev) => prev.filter((m) => m.ticker !== ticker));
   };
+
+  const handleReorder = useCallback(async (fromIdx: number, toIdx: number) => {
+    if (fromIdx === toIdx) return;
+    setMarkets((prev) => {
+      const next = [...prev];
+      const [moved] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, moved);
+      // Persist order in background
+      fetch("/api/markets", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tickers: next.map((m) => m.ticker) }),
+      }).catch(() => {});
+      return next;
+    });
+  }, []);
 
   const handleAnalyze = async (ticker: string) => {
     reset();
@@ -79,16 +97,53 @@ export default function Dashboard() {
           </div>
         )}
 
-        {markets.map((m) => (
-          <MarketCard
+        {markets.map((m, i) => (
+          <div
             key={m.ticker}
-            market={m}
-            runState={activeTicker === m.ticker ? runState : null}
-            onAnalyze={() => handleAnalyze(m.ticker)}
-            onCancel={cancel}
-            onRemove={() => handleRemove(m.ticker)}
-            onReportToggle={() => {}}
-          />
+            draggable
+            onDragStart={(e) => {
+              dragIdx.current = i;
+              e.dataTransfer.effectAllowed = "move";
+              // Make drag preview semi-transparent
+              if (e.currentTarget instanceof HTMLElement) {
+                e.currentTarget.style.opacity = "0.5";
+              }
+            }}
+            onDragEnd={(e) => {
+              if (e.currentTarget instanceof HTMLElement) {
+                e.currentTarget.style.opacity = "1";
+              }
+              dragIdx.current = null;
+              setDragOverIdx(null);
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              setDragOverIdx(i);
+            }}
+            onDragLeave={() => setDragOverIdx(null)}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (dragIdx.current !== null) {
+                handleReorder(dragIdx.current, i);
+              }
+              setDragOverIdx(null);
+            }}
+            className={`transition-all ${
+              dragOverIdx === i && dragIdx.current !== null && dragIdx.current !== i
+                ? "border-t-2 border-blue-500 pt-1"
+                : ""
+            }`}
+          >
+            <MarketCard
+              market={m}
+              runState={activeTicker === m.ticker ? runState : null}
+              onAnalyze={() => handleAnalyze(m.ticker)}
+              onCancel={cancel}
+              onRemove={() => handleRemove(m.ticker)}
+              onReportToggle={() => {}}
+            />
+          </div>
         ))}
       </main>
 

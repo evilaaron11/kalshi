@@ -58,6 +58,34 @@ export const BROWSER_HEADERS: Record<string, string> = {
   Referer: "https://www.google.com/",
 };
 
+// --- Congress.gov ---
+export const CONGRESS_API_BASE = "https://api.congress.gov/v3";
+export const CONGRESS_REQUEST_TIMEOUT = 15_000;
+export const CONGRESS_PER_PAGE_LIMIT = 20;
+
+// --- FRED (St. Louis Fed) ---
+export const FRED_API_BASE = "https://api.stlouisfed.org/fred";
+export const FRED_REQUEST_TIMEOUT = 15_000;
+export const FRED_DEFAULT_LIMIT = 12;
+// Shorthand series map for common Kalshi indicators
+export const FRED_SERIES_MAP: Record<string, string> = {
+  CPI: "CPIAUCSL",
+  UNEMPLOYMENT: "UNRATE",
+  GDP: "GDP",
+  FED_RATE: "FEDFUNDS",
+  NONFARM_PAYROLLS: "PAYEMS",
+  INFLATION: "T10YIE",
+  HOUSING_STARTS: "HOUST",
+  RETAIL_SALES: "RSXFS",
+  INITIAL_CLAIMS: "ICSA",
+};
+
+// --- Manifold Markets ---
+export const MANIFOLD_API_BASE = "https://api.manifold.markets/v0";
+export const MANIFOLD_REQUEST_TIMEOUT = 15_000;
+export const MANIFOLD_SEARCH_LIMIT = 5;
+
+
 // --- Pipeline models ---
 export const MODEL_HAIKU = "claude-haiku-4-5-20251001";
 export const MODEL_SONNET = "claude-sonnet-4-6";

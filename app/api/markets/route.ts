@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { loadWatchlist, addToWatchlist } from "@/lib/watchlist";
+import { loadWatchlist, addToWatchlist, saveWatchlist } from "@/lib/watchlist";
 import { fetchMarket, parseTicker } from "@/lib/kalshi";
 import { isEventData } from "@/lib/types";
 import type { MarketSummary } from "@/lib/types";
@@ -58,6 +58,16 @@ export async function GET() {
   }
 
   return NextResponse.json(results);
+}
+
+export async function PUT(request: NextRequest) {
+  const body = await request.json();
+  const tickers = body.tickers as string[];
+  if (!Array.isArray(tickers)) {
+    return NextResponse.json({ error: "tickers array is required" }, { status: 400 });
+  }
+  saveWatchlist(tickers);
+  return NextResponse.json({ watchlist: tickers });
 }
 
 export async function POST(request: NextRequest) {

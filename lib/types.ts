@@ -79,7 +79,7 @@ export interface StageEvent {
   detail?: string;
 }
 
-export type ToolCategory = "search" | "fetcher" | "bash" | "thinking";
+export type ToolCategory = "search" | "fetcher" | "bash" | "thinking" | "reasoning";
 
 export interface ProgressEvent {
   kind: "progress";
@@ -159,4 +159,139 @@ export interface FecCommittee {
   totalDisbursements: number;
   coverageDate: string;
   source: "fec";
+}
+
+// --- Congress.gov types ---
+
+export interface CongressBill {
+  billId: string;
+  number: string;
+  title: string;
+  type: string;
+  congress: number;
+  introducedDate: string;
+  latestAction: string;
+  latestActionDate: string;
+  sponsor: string;
+  sponsorParty: string;
+  cosponsorCount: number;
+  committees: string[];
+  status: string;
+  source: "congress.gov";
+}
+
+export interface CongressBillDetail extends CongressBill {
+  actions: { date: string; text: string }[];
+  cosponsors: { name: string; party: string; state: string }[];
+  relatedBills: { billId: string; title: string }[];
+  cboUrl?: string;
+}
+
+export interface FloorAction {
+  chamber: "House" | "Senate";
+  date: string;
+  billNumber?: string;
+  description: string;
+  source: "congress.gov";
+}
+
+// --- FRED types ---
+
+export interface FredObservation {
+  date: string;
+  value: number;
+}
+
+export interface FredSeries {
+  seriesId: string;
+  title: string;
+  frequency: string;
+  units: string;
+  lastUpdated: string;
+  observations?: FredObservation[];
+  source: "fred";
+}
+
+export interface FredRelease {
+  seriesId: string;
+  releaseName: string;
+  releaseDate: string;
+  source: "fred";
+}
+
+// --- Confirmation types ---
+
+export interface ConfirmationRecord {
+  nominee: string;
+  position: string;
+  president: string;
+  yearNominated: number;
+  yearResolved: number;
+  outcome: "confirmed" | "withdrawn" | "rejected";
+  daysToResolution: number;
+  senateVoteMargin?: number;
+  committeeVote?: string;
+  source: "historical";
+}
+
+export interface ConfirmationBaseRates {
+  position: string;
+  confirmationRate: number;
+  avgDays: number;
+  avgMargin: number | null;
+  totalCount: number;
+}
+
+export interface RecessAppointment {
+  president: string;
+  nominee: string;
+  position: string;
+  date: string;
+  context: string;
+  source: "historical";
+}
+
+// --- Cook PVI types ---
+
+export interface PviRecord {
+  state: string;
+  district?: number;
+  pviScore: string;
+  leanDirection: "R" | "D" | "EVEN";
+  leanMagnitude: number;
+  incumbent?: string;
+  incumbentParty?: string;
+  chamber: "House" | "Senate";
+  source: "cook-pvi";
+}
+
+// --- Senate / ProPublica types ---
+
+export interface Senator {
+  name: string;
+  party: "R" | "D" | "I";
+  state: string;
+  memberId: string;
+  nextElection: number;
+  source: "congress.gov";
+}
+
+export interface NominationVote {
+  voteId: string;
+  description: string;
+  result: string;
+  date: string;
+  yesVotes: number;
+  noVotes: number;
+  notVoting: number;
+  source: "senate.gov";
+}
+
+export interface WhipEstimate {
+  nomineeType: string;
+  estimatedYes: number;
+  estimatedNo: number;
+  estimatedUncertain: number;
+  swingSenators: { name: string; party: string; state: string; likelihood: string }[];
+  source: "congress.gov";
 }

@@ -6,6 +6,9 @@ import {
   METACULUS_API_BASE,
   METACULUS_REQUEST_TIMEOUT,
   METACULUS_SEARCH_LIMIT,
+  MANIFOLD_API_BASE,
+  MANIFOLD_REQUEST_TIMEOUT,
+  MANIFOLD_SEARCH_LIMIT,
 } from "../config";
 import type { CrossMarketResult } from "../types";
 
@@ -101,9 +104,44 @@ export async function searchMetaculus(
   return results;
 }
 
+export async function searchManifold(
+  query: string,
+  limit = MANIFOLD_SEARCH_LIMIT,
+): Promise<CrossMarketResult[]> {
+  const data = await getJson<Record<string, unknown>[]>(
+    `${MANIFOLD_API_BASE}/search-markets`,
+    {
+      params: { term: query, limit: String(limit) },
+      timeout: MANIFOLD_REQUEST_TIMEOUT,
+    },
+  );
+  if (!Array.isArray(data)) return [];
+
+  const results: CrossMarketResult[] = [];
+  for (const market of data) {
+    if (market.isResolved === true) continue;
+    const closeTime = market.closeTime as number | undefined;
+    if (closeTime !== undefined && closeTime < Date.now()) continue;
+
+    const url =
+      (market.url as string | undefined) ||
+      `https://manifold.markets/${market.creatorUsername as string}/${market.slug as string}`;
+
+    results.push({
+      platform: "manifold",
+      title: (market.question as string) || "",
+      probability: (market.probability as number) || 0,
+      volume: market.volume as number | undefined,
+      url,
+    });
+  }
+
+  return results;
+}
+
 export async function searchCrossMarket(
   query: string,
-  platforms: string[] = ["polymarket", "metaculus"],
+  platforms: string[] = ["polymarket", "metaculus", "manifold"],
   limit = 5,
 ): Promise<CrossMarketResult[]> {
   const promises: Promise<CrossMarketResult[]>[] = [];
@@ -112,6 +150,9 @@ export async function searchCrossMarket(
   }
   if (platforms.includes("metaculus")) {
     promises.push(searchMetaculus(query, limit));
+  }
+  if (platforms.includes("manifold")) {
+    promises.push(searchManifold(query, limit));
   }
   const arrays = await Promise.all(promises);
   return arrays.flat();

@@ -1,0 +1,20 @@
+{
+  "servers": {
+    "us-gov-open-data": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "us-gov-open-data-mcp",
+        "--modules",
+        "fred,congress,fec,treasury,bls,bea,federalregister,regulations,senatelobbying,sec,govinfo,usaspending,fbi,census"
+      ],
+      "env": {
+        "FRED_API_KEY": "${FRED_API_KEY}",
+        "DATA_GOV_API_KEY": "${DATA_GOV_API_KEY}",
+        "BEA_API_KEY": "${BEA_API_KEY}",
+        "BLS_API_KEY": "${BLS_API_KEY}",
+        "CENSUS_API_KEY": "${CENSUS_API_KEY}"
+      }
+    }
+  }
+}

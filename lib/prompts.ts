@@ -24,13 +24,102 @@ const FETCHER_DOCS = `AVAILABLE RESEARCH TOOLS (callable via Bash — use when c
   -> Use for: electoral markets — who wins a race, margin questions, generic ballot.
 
   npx tsx lib/fetchers/cli.ts cross-market --query "<market topic keywords>"
-  -> Cross-platform price comparison: searches Polymarket and Metaculus for matching markets.
+  -> Cross-platform price comparison: searches Polymarket, Metaculus, and Manifold Markets.
   -> ALWAYS call this tool. Use 2-4 keywords from the market title as the query.
   -> Returns: platform, title, probability, volume/forecasters, URL for each match.
   -> Critical for arbitrage detection — price gaps between platforms are actionable signal.
 
+  npx tsx lib/fetchers/cli.ts congress --search "<topic>" [--congress 119] [--limit 10]
+  npx tsx lib/fetchers/cli.ts congress --bill "<billId>"   (e.g., hr1234, s5678, hjres77)
+  npx tsx lib/fetchers/cli.ts congress --floor [--chamber house|senate]
+  -> Congress.gov: bill status, cosponsors, latest actions, floor schedule.
+  -> Use for: shutdown, debt ceiling, legislation markets, "will X bill pass" questions.
+  -> --floor returns upcoming scheduled votes — strong signal for timing markets.
+
+  npx tsx lib/fetchers/cli.ts fred --series "<ID or shorthand>" [--limit 12]
+  npx tsx lib/fetchers/cli.ts fred --search "<topic>" [--limit 5]
+  npx tsx lib/fetchers/cli.ts fred --releases --series "<ID>"
+  -> FRED economic data: CPI, jobs, GDP, rates, and 800k+ other series.
+  -> Shorthands: CPI, UNEMPLOYMENT, GDP, FED_RATE, NONFARM_PAYROLLS, INFLATION,
+     HOUSING_STARTS, RETAIL_SALES, INITIAL_CLAIMS (auto-resolved to FRED series IDs).
+  -> --releases returns next scheduled data release date — critical for timing.
+  -> Use for: economic threshold markets (CPI > X, unemployment below Y, rate decisions).
+
+  npx tsx lib/fetchers/cli.ts confirmations --position "<title>" [--president "<name>"]
+  npx tsx lib/fetchers/cli.ts confirmations --appointments [--president "<name>"]
+  -> Historical confirmation data: outcomes, timelines, vote margins since Reagan.
+  -> Returns matching records + base rates (confirmation rate, avg days, avg margin).
+  -> Use for: cabinet/judicial nomination markets. Base rates like "95% of nominees
+     with a scheduled hearing get confirmed" are strong calibration anchors.
+  -> --appointments returns recess appointment history.
+
+  npx tsx lib/fetchers/cli.ts pvi --state "<XX>" [--district N]
+  npx tsx lib/fetchers/cli.ts pvi --competitive [--threshold N]
+  -> Cook PVI partisan lean scores for House districts and Senate seats.
+  -> Use for: electoral markets — establishes baseline lean before polling data.
+  -> --competitive returns toss-up and lean races (default threshold: PVI ≤ 5).
+
+  npx tsx lib/fetchers/cli.ts senate --members [--party R|D|I]
+  npx tsx lib/fetchers/cli.ts senate --votes [--congress 119] [--limit 10]
+  npx tsx lib/fetchers/cli.ts senate --whip "<nomineeType>"
+  -> Senate data: roster from Congress.gov, confirmation votes from senate.gov XML.
+  -> --whip generates an estimated vote breakdown with swing senator identification.
+  -> Use for: confirmation/nomination markets — directly answers "does this person have the votes?"
+
 These return structured primary data that news articles often summarize incompletely or inaccurately.
 Call them alongside web search — they do not count against your search limit.`;
+
+const MCP_CALIBRATOR_DOCS = `OPTIONAL: US GOVERNMENT DATA MCP TOOLS (for calibration lookups)
+
+You may call MCP tools to pull specific data points that help anchor your probability estimate.
+MCP tools are named mcp__us-gov-open-data__<module>_<function>. Good calibration lookups:
+
+- mcp__us-gov-open-data__fred_series_data — pull latest economic indicator to verify analyst claims
+- mcp__us-gov-open-data__treasury_fiscal_data — check debt/spending figures
+- mcp__us-gov-open-data__bls_employment — verify jobs/labor data
+- mcp__us-gov-open-data__bea_gdp_national — verify GDP figures
+
+Only use these if the analysts' data seems stale or you need a specific number to calibrate.
+Do NOT do open-ended research — the analysts already did that.`;
+
+const MCP_DOCS = `REQUIRED: US GOVERNMENT DATA MCP TOOLS
+
+You MUST use at least 1-2 MCP tool calls per analysis. These provide official government data
+that supplements web search with authoritative primary sources. MCP tools are named like
+mcp__us-gov-open-data__<module>_<function>. Call them directly — they return structured JSON.
+
+WHEN TO USE EACH MODULE (match market topic to the right module):
+
+  Markets about cabinet/nominations/personnel:
+  → mcp__us-gov-open-data__senatelobbying_search — lobbying ties for nominees
+  → mcp__us-gov-open-data__govinfo_search — congressional hearing records, committee reports
+  → mcp__us-gov-open-data__federalregister_search — any related executive orders or rules
+
+  Markets about legislation/shutdown/debt ceiling:
+  → mcp__us-gov-open-data__congress_bill_search — bill text, status, actions
+  → mcp__us-gov-open-data__treasury_fiscal_data — national debt, spending, revenue
+  → mcp__us-gov-open-data__usaspending_search — federal spending data
+
+  Markets about economic thresholds (CPI, GDP, jobs, rates):
+  → mcp__us-gov-open-data__fred_series_data — economic time series (CPI, unemployment, etc.)
+  → mcp__us-gov-open-data__bls_employment — detailed employment/labor data
+  → mcp__us-gov-open-data__bea_gdp_national — GDP breakdowns, growth rates
+
+  Markets about regulations/executive orders:
+  → mcp__us-gov-open-data__federalregister_search — published and proposed rules
+  → mcp__us-gov-open-data__regulations_search — public comment data
+
+  Markets about elections/political races:
+  → mcp__us-gov-open-data__fec_candidate_search — campaign finance data
+  → mcp__us-gov-open-data__census_acs — district demographics
+
+  General political markets:
+  → mcp__us-gov-open-data__govinfo_search — congressional records, presidential documents
+  → mcp__us-gov-open-data__federalregister_search — executive actions, proclamations
+
+Use custom fetchers (via Bash) for the specific data they cover. Use MCP tools for everything else.
+If in doubt, call an MCP tool — the worst case is you get data that confirms what web search found.`;
+
 
 
 // --- Evidence Agent ---
@@ -48,6 +137,8 @@ CLOSE DATE: ${closeDate}
 CURRENT YES PRICE: ${yesPrice}
 
 ${FETCHER_DOCS}
+
+${MCP_DOCS}
 
 Research this market. Find recent news, official statements, data, and any other relevant information.
 
@@ -82,6 +173,8 @@ QUALIFYING OUTCOMES (yes_price >= 5%, sorted by probability):
 ${outcomesText}
 
 ${FETCHER_DOCS}
+
+${MCP_DOCS}
 
 Research this event. For each outcome, find recent news, statements from key decision-makers, timelines, and any context that bears on which outcome is most likely.
 
@@ -310,7 +403,10 @@ export function calibratorBinary(
   yesPrice: string, volume: number,
   evidence: string, da: string, resolution: string, chaos: string,
 ): string {
-  return `SEARCH POLICY: Do not perform additional web searches. Synthesize only from the provided analyst outputs.
+  return `SEARCH POLICY: Do NOT perform web searches. Synthesize from the provided analyst outputs.
+You MAY use government data MCP tools to pull specific numbers for calibration (e.g., economic indicators, confirmation base rates, spending data) but keep it targeted — no open-ended research.
+
+${MCP_CALIBRATOR_DOCS}
 
 You are an expert superforecaster. Synthesize research from a panel of analysts into a final probability estimate.
 
@@ -383,7 +479,10 @@ export function calibratorEvent(
   volume: number,
   evidence: string, da: string, resolution: string, chaos: string,
 ): string {
-  return `SEARCH POLICY: Do not perform additional web searches. Synthesize only from the provided analyst outputs.
+  return `SEARCH POLICY: Do NOT perform web searches. Synthesize from the provided analyst outputs.
+You MAY use government data MCP tools to pull specific numbers for calibration (e.g., economic indicators, confirmation base rates, spending data) but keep it targeted — no open-ended research.
+
+${MCP_CALIBRATOR_DOCS}
 
 You are an expert superforecaster. Synthesize research from a panel of analysts and produce a ranked assessment of all qualifying outcomes.
 

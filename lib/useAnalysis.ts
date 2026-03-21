@@ -100,6 +100,20 @@ export function useAnalysis() {
       await fetch(`/api/analyze/${runState.runId}/cancel`, { method: "POST" });
     }
     esRef.current?.close();
+    // Mark all running stages as cancelled in the UI
+    setRunState((prev) => {
+      const updatedStages = { ...prev.stages };
+      for (const [key, stage] of Object.entries(updatedStages)) {
+        if (stage.status === "running") {
+          updatedStages[key] = { ...stage, status: "error", detail: "Cancelled" };
+        }
+      }
+      return {
+        ...prev,
+        stages: updatedStages,
+        error: "Cancelled",
+      };
+    });
   }, [runState.runId]);
 
   const reset = useCallback(() => {

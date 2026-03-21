@@ -6,221 +6,104 @@ Ranked datasets and signals to add to the analysis pipeline, grouped by build di
 
 ---
 
-## Execution Plan (Easy Tier)
+## Implemented (Easy Tier) — completed 2026-03-20
 
-### Priority order
+All 9 easy epics were built using a 4-phase multi-agent workflow. 226 tests across 17 files, all passing.
 
-| Priority | Epic | Rationale |
-|----------|------|-----------|
-| 1 | Congress.gov (Epic 1) | Highest coverage — shutdown, debt ceiling, legislation markets are most common on Kalshi |
-| 2 | FRED (Epic 2) | Second highest coverage — economic threshold markets (CPI, jobs, rates) are high-volume |
-| 3 | Confirmations (Epic 3) | Directly enables cabinet/nomination markets. Static data = fast build. Needed before Epic 9 |
-| 4 | Senate votes (Epic 4) | Whip count estimates are the most actionable signal for nomination markets. Pairs with Epic 3 |
-| 5 | Manifold (Epic 7) | Quick win — extends existing `crossMarket.ts`. Improves every analysis |
-| 6 | Cook PVI (Epic 6) | Static dataset, fast build. Baseline for all electoral markets |
-| 7 | ProPublica voting records (Epic 5) | Extends Epic 4's `senate.ts`. Adds depth but Epic 4 alone covers most nomination needs |
-| 8 | GovTrack prognosis (Epic 8) | Extends Epic 1's `congress.ts`. Nice-to-have on top of raw bill data |
-| 9 | Recess appointments (Epic 9) | Tiny dataset, rare event. Trivial build but lowest impact |
+### What was built
 
-### Multi-agent workflow
+| Epic | Status | File(s) | Tests | Notes |
+|------|--------|---------|-------|-------|
+| 1. Congress.gov | ✅ Done | `lib/fetchers/congress.ts` | 26 in `congress.test.ts` | `searchBills`, `getBillDetails`, `getFloorSchedule`, `getPrognosis` (GovTrack) |
+| 2. FRED | ✅ Done | `lib/fetchers/fred.ts` | 16 in `fred.test.ts` | `getSeries` (with shorthand map), `searchSeries`, `getReleaseDates` |
+| 3. Confirmations | ✅ Done | `lib/fetchers/confirmations.ts`, `data/confirmations.json` (80 records) | 18 in `confirmations.test.ts` | `searchConfirmations`, `getBaseRates`, `getAppointments` |
+| 4+5. Senate | ✅ Done | `lib/fetchers/senate.ts` | 18 in `senate.test.ts` | `getMembers`, `getNominationVotes`, `getWhipEstimate` |
+| 6. Cook PVI | ✅ Done | `lib/fetchers/pvi.ts`, `data/cook-pvi.json` (143 records) | 13 in `pvi.test.ts` | `getDistrictLean`, `getCompetitiveRaces` |
+| 7. Manifold | ✅ Done | `lib/fetchers/crossMarket.ts` (extended) | 15 in `crossMarket.test.ts` | `searchManifold` added as 3rd cross-market platform |
+| 8. GovTrack | ✅ Done | `lib/fetchers/congress.ts` (extended) | included in `congress.test.ts` | `getPrognosis` scrapes bill passage probability |
+| 9. Recess | ✅ Done | `lib/fetchers/confirmations.ts`, `data/recess-appointments.json` (15 records) | included in `confirmations.test.ts` | `getAppointments` |
 
-4 phases, maximizing parallelism while respecting dependencies. Each parallel agent runs in an isolated git worktree.
+### Key implementation decisions
+
+- **ProPublica deprecated** — Epics 4+5 were originally planned for ProPublica Congress API, which is now dead. Replaced with:
+  - **Congress.gov API** for senator roster (`/member/congress/119`)
+  - **senate.gov public XML** for confirmation vote data (no auth required)
+- **Epic 5 descoped** — individual senator voting profiles (`getMemberProfile`, `getPartyLineBreakdown`) require per-senator roll call data not available from senate.gov XML summary. Deferred to medium tier if needed via senate.gov individual vote detail XML.
+- **Epic 8 merged into Epic 1** — `getPrognosis()` lives in `congress.ts` since it extends bill data.
+- **Epic 9 merged into Epic 3** — `getAppointments()` lives in `confirmations.ts` since it's the same domain.
+
+### API keys required
+
+| Key | Required? | Source |
+|-----|-----------|--------|
+| `CONGRESS_API_KEY` | Recommended | https://api.congress.gov — free, instant |
+| `FRED_API_KEY` | **Required** for economic data | https://api.stlouisfed.org/api_key — free, instant |
+
+No auth needed for: confirmations (static), PVI (static), Manifold, senate.gov XML, GovTrack scrape.
+
+### Multi-agent execution log
 
 ```
-Phase 1: Scaffold (1 agent, serial)
-│   - Pre-wire cli.ts with placeholder routing for all 7 new commands
-│   - Add empty FETCHER_DOCS sections in prompts.ts
-│   - Add classifyTool cases in pipeline.ts
-│   - Prevents merge conflicts when parallel agents edit shared files
-│
-├───────┬───────┬────────┬─────────┐
-▼       ▼       ▼        ▼         ▼
-Congress  FRED  Confirms   PVI    Manifold    ← Phase 2 (5 parallel agents)
-(Ep 1)  (Ep 2)  (Ep 3)  (Ep 6)   (Ep 7)
-│                │
-▼                ▼
-GovTrack      Recess     Senate               ← Phase 3 (3 agents)
-(Ep 8)        (Ep 9)    (Ep 4+5)
-│              │           │
-└──────┬───────┴───────────┘
-       ▼
-Phase 4: Integration (1 agent, serial)
-    - Merge all branches, resolve conflicts
-    - Fill in FETCHER_DOCS with real usage docs
-    - Update .env.example with new keys
-    - Run full test suite
-    - Update README.md and design.md
+Phase 1: Scaffold — pre-wired cli.ts, config.ts, types.ts, pipeline.ts, prompts.ts
+Phase 2: 5 parallel agents (Congress, FRED, Confirmations, PVI, Manifold) — all succeeded
+Phase 3: 3 agents (Senate, GovTrack extending congress.ts, Recess already done) — all succeeded
+Phase 4: Integration — FETCHER_DOCS updated, classifyTool wired, .env.example updated, 226 tests green
+Post-build: ProPublica removed, senate.ts rewritten for Congress.gov + senate.gov XML
 ```
 
-**Phase 2** — 5 agents build in parallel. Zero shared code between them:
-- Agent A: `lib/fetchers/congress.ts` + `__tests__/congress.test.ts`
-- Agent B: `lib/fetchers/fred.ts` + `__tests__/fred.test.ts`
-- Agent C: `data/confirmations.json` + `lib/fetchers/confirmations.ts` + `__tests__/confirmations.test.ts`
-- Agent D: `data/cook-pvi.json` + `lib/fetchers/pvi.ts` + `__tests__/pvi.test.ts`
-- Agent E: Extends `lib/fetchers/crossMarket.ts` with Manifold + `__tests__/crossMarket.test.ts`
-
-**Phase 3** — 3 agents, partially parallel:
-- Agent F: `lib/fetchers/senate.ts` + `__tests__/senate.test.ts` (independent, runs in parallel)
-- Agent G: Extends `congress.ts` from Agent A with `getPrognosis()` (waits on Phase 2)
-- Agent H: Extends `confirmations.ts` from Agent C with `getAppointments()` (waits on Phase 2)
-
-**Risks and mitigations:**
-
-| Risk | Mitigation |
-|------|------------|
-| Merge conflicts in shared files | Phase 1 scaffold pre-wires all shared files; agents only edit their own module |
-| Static data quality (Epics 3, 6, 9) | Agents use web search to compile data, cross-reference multiple sources |
-| API auth issues | Each agent tests against real API in its worktree before committing |
-| Prompt bloat in FETCHER_DOCS | Phase 4 agent reviews total token count, keeps docs concise |
-
 ---
 
-## Easy
+## MCP Server: US Gov Open Data — integrated 2026-03-20
 
-### Epic 1: Congress.gov API
-**Impact:** High | **Coverage:** Very high
-Covers shutdown, debt ceiling, "will X bill pass" markets. Free API, no key required (rate-limited to 5k/hr).
+Added [`us-gov-open-data-mcp`](https://github.com/lzinga/us-gov-open-data-mcp) as an MCP server for Claude Code and pipeline agents. Provides 300+ tools across 40+ U.S. government APIs with built-in caching, rate limiting, and retry.
 
-**API base:** `https://api.congress.gov/v3`
+### Configuration
 
-| Story | Description | Acceptance Criteria |
-|-------|-------------|---------------------|
-| 1.1 | Create `lib/fetchers/congress.ts` with `searchBills(query, congress?, limit?)` | Returns bill number, title, status, latest action, sponsor, cosponsor count, committees |
-| 1.2 | Add `getBillDetails(billId)` to fetch full bill info | Returns full action history, all cosponsors with party, related bills, CBO score URL if available |
-| 1.3 | Add `getFloorSchedule()` for House and Senate | Returns upcoming floor actions with dates, bill numbers, and expected action type |
-| 1.4 | Wire into CLI: `npx tsx lib/fetchers/cli.ts congress --search "shutdown" [--congress 119] [--limit 10]` | CLI prints JSON, handles errors |
-| 1.5 | Add CLI subcommand: `congress --floor [--chamber house\|senate]` | Returns upcoming scheduled votes |
-| 1.6 | Add to `FETCHER_DOCS` in `prompts.ts` with usage guidance | Agents know when/how to call it |
-| 1.7 | Add `classifyTool` case in `pipeline.ts` for progress display | UI shows "Congress lookup: ..." during runs |
-| 1.8 | Write tests: mock API responses, CLI arg parsing, error handling | ≥8 tests covering search, details, floor, errors |
+- **Project MCP config:** `.mcp.json` (project root)
+- **VS Code MCP config:** `.vscode/mcp.json`
+- **Modules loaded:** `fred, congress, fec, treasury, bls, bea, federalregister, regulations, senatelobbying, sec, govinfo, usaspending, fbi, census`
 
----
+### What this covers (beyond custom fetchers)
 
-### Epic 2: FRED Economic Data
-**Impact:** High | **Coverage:** Very high
-Covers CPI, jobs, GDP, rate decision, unemployment markets. Free API key from `api.stlouisfed.org`.
+| Module | What it adds | Relevant market types |
+|--------|-------------|----------------------|
+| `treasury` | Fiscal data, national debt, spending | Debt ceiling, government spending markets |
+| `bls` | Labor statistics beyond FRED | Jobs report, wage growth markets |
+| `bea` | GDP breakdowns, trade balance | GDP threshold, trade deficit markets |
+| `federalregister` | Rules, proposed rules, EO tracking | Regulatory action, executive order markets |
+| `regulations` | Public comment data on proposed rules | Rulemaking timeline markets |
+| `senatelobbying` | Lobbying disclosures (replaces hard Epic 21) | Nomination vetting, conflict of interest |
+| `sec` | SEC EDGAR filings | Financial regulation markets |
+| `govinfo` | Congressional records, reports | Legislation, oversight markets |
+| `usaspending` | Federal spending data | Budget, appropriations markets |
+| `fbi` | Crime statistics | Public safety policy markets |
+| `census` | Demographics, population data | Electoral demographic analysis |
 
-**API base:** `https://api.stlouisfed.org/fred`
+### API keys for MCP server
 
-| Story | Description | Acceptance Criteria |
-|-------|-------------|---------------------|
-| 2.1 | Create `lib/fetchers/fred.ts` with `getSeries(seriesId, limit?)` | Returns recent observations (date, value) for any FRED series |
-| 2.2 | Add `searchSeries(query, limit?)` to find relevant series IDs | Returns series ID, title, frequency, last updated, units |
-| 2.3 | Add hardcoded series map for common Kalshi indicators: `CPI` → CPIAUCSL, `UNEMPLOYMENT` → UNRATE, `GDP` → GDP, `FED_RATE` → FEDFUNDS, `NONFARM_PAYROLLS` → PAYEMS | Agents can use shorthand names instead of memorizing series IDs |
-| 2.4 | Add `getReleaseDates(seriesId)` — next scheduled data release | Returns upcoming release dates so agents know when the number drops |
-| 2.5 | Wire into CLI: `npx tsx lib/fetchers/cli.ts fred --series "UNRATE" [--limit 12]` | CLI prints JSON time series |
-| 2.6 | Add CLI subcommand: `fred --search "consumer price index" [--limit 5]` | Returns matching series |
-| 2.7 | Add CLI subcommand: `fred --releases --series "CPIAUCSL"` | Returns next release date |
-| 2.8 | Add to `FETCHER_DOCS` in `prompts.ts` | Agents know the shorthand map and when to use FRED |
-| 2.9 | Add `classifyTool` case in `pipeline.ts` | UI shows "FRED lookup: ..." |
-| 2.10 | Add `FRED_API_KEY` to `.env.example` and `config.ts` | Documented, with fallback error message if missing |
-| 2.11 | Write tests: mock series data, search, release dates, shorthand resolution | ≥8 tests |
+| Key | Required? | Source | Covers |
+|-----|-----------|--------|--------|
+| `DATA_GOV_API_KEY` | Recommended | https://api.data.gov/signup/ | Congress.gov, FEC, FDA, FBI, GovInfo, NREL, Regulations.gov, USDA FoodData |
+| `FRED_API_KEY` | Already have | (reused from custom fetcher) | FRED |
+| `BEA_API_KEY` | Optional | https://apps.bea.gov/API/signup/ | BEA GDP/trade data |
+| `BLS_API_KEY` | Optional | https://www.bls.gov/developers/home.htm | BLS (higher rate limits) |
+| `CENSUS_API_KEY` | Optional | https://api.census.gov/data/key_signup.html | Census |
 
----
+20+ APIs require no key at all (Treasury, FDIC, Federal Register, Senate Lobbying, SEC, USAspending, etc.)
 
-### Epic 3: Historical Confirmation Outcomes
-**Impact:** High | **Coverage:** Medium
-Static dataset of every cabinet/judicial nominee outcome since Reagan. Enables calibration like "95% of nominees with a scheduled hearing get confirmed."
+### How agents access it
 
-| Story | Description | Acceptance Criteria |
-|-------|-------------|---------------------|
-| 3.1 | Research and compile dataset: nominee name, position, president, year nominated, year resolved, outcome (confirmed/withdrawn/rejected), days to confirmation, senate vote margin, committee vote | JSON file in `data/confirmations.json`, ≥150 entries |
-| 3.2 | Create `lib/fetchers/confirmations.ts` with `searchConfirmations(position?, president?, outcome?)` | Filters dataset, returns matching records |
-| 3.3 | Add `getBaseRates(position)` — computes confirmation rate, avg days, avg margin for a position type | Returns `{ confirmationRate, avgDays, avgMargin, totalCount }` |
-| 3.4 | Wire into CLI: `npx tsx lib/fetchers/cli.ts confirmations --position "Secretary of Defense" [--president "Trump"]` | CLI prints filtered records + base rates |
-| 3.5 | Add to `FETCHER_DOCS` in `prompts.ts` | Agents call it for any nomination market |
-| 3.6 | Add `classifyTool` case in `pipeline.ts` | UI shows "Confirmation lookup: ..." |
-| 3.7 | Write tests: filtering, base rate computation, edge cases (no matches) | ≥6 tests |
+- **Claude Code sessions** (CLI + VS Code): MCP tools are available automatically via `.mcp.json`
+- **Pipeline agents**: Claude CLI subprocesses inherit MCP server config when spawned from a project with `.mcp.json`
+- **Custom fetchers remain primary**: Agents use curated `FETCHER_DOCS` tools first. MCP server provides fallback access to the long tail of government data.
 
----
+### Medium/hard epics made redundant
 
-### Epic 4: Senator Nomination Vote History
-**Impact:** High | **Coverage:** Medium
-Via ProPublica Congress API. Enables whip count estimates per nominee.
-
-**API base:** `https://api.propublica.org/congress/v1`
-
-| Story | Description | Acceptance Criteria |
-|-------|-------------|---------------------|
-| 4.1 | Create `lib/fetchers/senate.ts` with `getMembers(congress?, chamber?)` | Returns current senators: name, party, state |
-| 4.2 | Add `getNominationVotes(congress?)` — all nomination roll call votes | Returns vote ID, nominee description, result, date, vote counts |
-| 4.3 | Add `getMemberVotePositions(memberId, voteId)` — how a specific senator voted | Returns yes/no/not voting per senator for a given vote |
-| 4.4 | Add `getWhipEstimate(nomineeType)` — compute likely vote breakdown based on historical patterns | Returns estimated yes/no/uncertain counts by party, list of swing senators |
-| 4.5 | Wire into CLI: `npx tsx lib/fetchers/cli.ts senate --votes [--congress 119] [--limit 10]` | CLI prints recent nomination votes |
-| 4.6 | Add CLI subcommand: `senate --members [--party R\|D\|I]` | Returns current senate roster |
-| 4.7 | Add to `FETCHER_DOCS` in `prompts.ts` | Agents call it for nomination/confirmation markets |
-| 4.8 | Add `PROPUBLICA_API_KEY` to `.env.example` and `config.ts` | Documented |
-| 4.9 | Add `classifyTool` case in `pipeline.ts` | UI shows "Senate lookup: ..." |
-| 4.10 | Write tests: mock API, member filtering, vote parsing | ≥8 tests |
-
----
-
-### Epic 5: ProPublica Congress API (Voting Records)
-**Impact:** Medium | **Coverage:** High
-Extends Epic 4 beyond nominations to general voting patterns and party-line analysis.
-
-| Story | Description | Acceptance Criteria |
-|-------|-------------|---------------------|
-| 5.1 | Add `getRecentVotes(chamber, limit?)` to `senate.ts` | Returns recent roll call votes: bill, result, party breakdown |
-| 5.2 | Add `getMemberProfile(memberId)` — voting stats, party loyalty %, missed votes % | Returns member profile with loyalty and bipartisanship metrics |
-| 5.3 | Add `getPartyLineBreakdown(voteId)` — who crossed party lines | Returns list of crossover voters with party and state |
-| 5.4 | Wire into CLI: `senate --profile "Susan Collins"` and `senate --recent-votes [--chamber senate]` | CLI prints results |
-| 5.5 | Update `FETCHER_DOCS` with new subcommands | Agents can query voting patterns |
-| 5.6 | Write tests for new functions | ≥5 tests |
-
----
-
-### Epic 6: Cook PVI / Partisan Lean Scores
-**Impact:** Medium | **Coverage:** High
-Static dataset updated yearly. Baseline for any House/Senate race market.
-
-| Story | Description | Acceptance Criteria |
-|-------|-------------|---------------------|
-| 6.1 | Compile Cook PVI scores into `data/cook-pvi.json`: district/state, PVI score, lean direction, incumbent, incumbent party | All 435 House districts + 50 states for Senate |
-| 6.2 | Create `lib/fetchers/pvi.ts` with `getDistrictLean(state, district?)` | Returns PVI score, incumbent info |
-| 6.3 | Add `getCompetitiveRaces(threshold?)` — all races within ±N PVI points | Returns sorted list of toss-up / lean districts |
-| 6.4 | Wire into CLI: `npx tsx lib/fetchers/cli.ts pvi --state GA [--district 6]` | CLI prints lean data |
-| 6.5 | Add to `FETCHER_DOCS` in `prompts.ts` | Agents use for electoral markets |
-| 6.6 | Write tests | ≥5 tests |
-
----
-
-### Epic 7: Manifold Markets API
-**Impact:** Medium | **Coverage:** High
-Additional cross-market source. Free, no auth required.
-
-**API base:** `https://api.manifold.markets/v0`
-
-| Story | Description | Acceptance Criteria |
-|-------|-------------|---------------------|
-| 7.1 | Add `searchManifold(query, limit?)` to `lib/fetchers/crossMarket.ts` | Returns title, probability, volume, URL for matching markets |
-| 7.2 | Integrate into existing `searchCrossMarket()` alongside Polymarket + Metaculus | Combined results include Manifold markets |
-| 7.3 | Update cross-market output format to include platform name per result | Agents see which platform each price comes from |
-| 7.4 | Write tests: mock Manifold API response, integration with existing cross-market | ≥4 tests |
-
----
-
-### Epic 8: GovTrack Prognosis Scores
-**Impact:** Medium | **Coverage:** Medium
-ML-generated bill passage probabilities from GovTrack.
-
-| Story | Description | Acceptance Criteria |
-|-------|-------------|---------------------|
-| 8.1 | Add `getPrognosis(billId)` to `lib/fetchers/congress.ts` — scrape GovTrack prognosis page | Returns passage probability %, factors, last updated |
-| 8.2 | Integrate into `searchBills()` output when available | Bill search results include prognosis score when GovTrack has one |
-| 8.3 | Write tests with mocked HTML | ≥3 tests |
-
----
-
-### Epic 9: Recess Appointment History
-**Impact:** Low | **Coverage:** Low
-Tiny static dataset, trivial to add.
-
-| Story | Description | Acceptance Criteria |
-|-------|-------------|---------------------|
-| 9.1 | Compile recess appointments into `data/recess-appointments.json`: president, nominee, position, date, context | All modern-era recess appointments (~30 entries) |
-| 9.2 | Add `getAppointments(president?, position?)` to `confirmations.ts` | Returns filtered records |
-| 9.3 | Write tests | ≥2 tests |
+| Epic | Status | Replaced by |
+|------|--------|-------------|
+| 12. Federal Register bulk data | **Covered** | `federalregister` module |
+| 16. LegiScan | **Partially covered** | `congress` module (federal only, no state) |
+| 21. Lobbying disclosures (LDA) | **Covered** | `senatelobbying` module |
 
 ---
 

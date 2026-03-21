@@ -8,7 +8,7 @@ import {
 import type { FecCandidate, FecCommittee } from "../types";
 
 function getApiKey(): string {
-  return process.env.FEC_API_KEY || FEC_DEFAULT_API_KEY;
+  return process.env.DATA_GOV_API_KEY || process.env.FEC_API_KEY || FEC_DEFAULT_API_KEY;
 }
 
 export async function searchCandidates(opts: {

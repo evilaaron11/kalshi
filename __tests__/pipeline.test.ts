@@ -40,6 +40,26 @@ function classifyTool(
       const race = cmd.match(/--race\s+"([^"]+)"/)?.[1] || "";
       return { detail: `Polling data: ${race}`, toolName: "polling", toolCategory: "fetcher" };
     }
+    if (cmd.includes("cli.ts congress")) {
+      const q = cmd.match(/--(?:search|bill)\s+"([^"]+)"/)?.[1] || "floor schedule";
+      return { detail: `Congress lookup: ${q}`, toolName: "congress", toolCategory: "fetcher" };
+    }
+    if (cmd.includes("cli.ts fred")) {
+      const q = cmd.match(/--(?:series|search)\s+"([^"]+)"/)?.[1] || "";
+      return { detail: `FRED data: ${q}`, toolName: "fred", toolCategory: "fetcher" };
+    }
+    if (cmd.includes("cli.ts confirmations")) {
+      const q = cmd.match(/--position\s+"([^"]+)"/)?.[1] || "history";
+      return { detail: `Confirmation lookup: ${q}`, toolName: "confirmations", toolCategory: "fetcher" };
+    }
+    if (cmd.includes("cli.ts pvi")) {
+      const q = cmd.match(/--state\s+"([^"]+)"/)?.[1] || "competitive";
+      return { detail: `PVI data: ${q}`, toolName: "pvi", toolCategory: "fetcher" };
+    }
+    if (cmd.includes("cli.ts senate")) {
+      const q = cmd.match(/--whip\s+"([^"]+)"/)?.[1] || "votes";
+      return { detail: `Senate lookup: ${q}`, toolName: "senate", toolCategory: "fetcher" };
+    }
     return { detail: `Running: ${cmd.slice(0, 80)}`, toolName: "Bash", toolCategory: "bash" };
   }
   return { detail: `Using ${toolName}...`, toolName, toolCategory: "thinking" };
@@ -101,6 +121,59 @@ describe("classifyTool", () => {
     });
     expect(result.toolCategory).toBe("fetcher");
     expect(result.toolName).toBe("polling");
+  });
+
+  it("classifies congress fetcher", () => {
+    const result = classifyTool("Bash", {
+      command: 'npx tsx lib/fetchers/cli.ts congress --search "government shutdown"',
+    });
+    expect(result.toolCategory).toBe("fetcher");
+    expect(result.toolName).toBe("congress");
+    expect(result.detail).toContain("government shutdown");
+  });
+
+  it("classifies congress floor schedule", () => {
+    const result = classifyTool("Bash", {
+      command: "npx tsx lib/fetchers/cli.ts congress --floor --chamber senate",
+    });
+    expect(result.toolCategory).toBe("fetcher");
+    expect(result.detail).toContain("floor schedule");
+  });
+
+  it("classifies fred fetcher", () => {
+    const result = classifyTool("Bash", {
+      command: 'npx tsx lib/fetchers/cli.ts fred --series "CPI"',
+    });
+    expect(result.toolCategory).toBe("fetcher");
+    expect(result.toolName).toBe("fred");
+    expect(result.detail).toContain("CPI");
+  });
+
+  it("classifies confirmations fetcher", () => {
+    const result = classifyTool("Bash", {
+      command: 'npx tsx lib/fetchers/cli.ts confirmations --position "Secretary of Defense"',
+    });
+    expect(result.toolCategory).toBe("fetcher");
+    expect(result.toolName).toBe("confirmations");
+    expect(result.detail).toContain("Secretary of Defense");
+  });
+
+  it("classifies pvi fetcher", () => {
+    const result = classifyTool("Bash", {
+      command: 'npx tsx lib/fetchers/cli.ts pvi --state "GA"',
+    });
+    expect(result.toolCategory).toBe("fetcher");
+    expect(result.toolName).toBe("pvi");
+    expect(result.detail).toContain("GA");
+  });
+
+  it("classifies senate whip fetcher", () => {
+    const result = classifyTool("Bash", {
+      command: 'npx tsx lib/fetchers/cli.ts senate --whip "cabinet"',
+    });
+    expect(result.toolCategory).toBe("fetcher");
+    expect(result.toolName).toBe("senate");
+    expect(result.detail).toContain("cabinet");
   });
 
   it("classifies generic Bash command", () => {

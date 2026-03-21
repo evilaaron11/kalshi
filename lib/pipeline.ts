@@ -59,7 +59,51 @@ function classifyTool(toolName: string, input: Record<string, unknown>): ToolPro
       const race = cmd.match(/--race\s+"([^"]+)"/)?.[1] || "";
       return { detail: `Polling data: ${race}`, toolName: "polling", toolCategory: "fetcher" };
     }
+    if (cmd.includes("cli.ts congress")) {
+      const q = cmd.match(/--(?:search|bill)\s+"([^"]+)"/)?.[1] || "floor schedule";
+      return { detail: `Congress lookup: ${q}`, toolName: "congress", toolCategory: "fetcher" };
+    }
+    if (cmd.includes("cli.ts fred")) {
+      const q = cmd.match(/--(?:series|search)\s+"([^"]+)"/)?.[1] || "";
+      return { detail: `FRED data: ${q}`, toolName: "fred", toolCategory: "fetcher" };
+    }
+    if (cmd.includes("cli.ts confirmations")) {
+      const q = cmd.match(/--position\s+"([^"]+)"/)?.[1] || "history";
+      return { detail: `Confirmation lookup: ${q}`, toolName: "confirmations", toolCategory: "fetcher" };
+    }
+    if (cmd.includes("cli.ts pvi")) {
+      const q = cmd.match(/--state\s+"([^"]+)"/)?.[1] || "competitive";
+      return { detail: `PVI data: ${q}`, toolName: "pvi", toolCategory: "fetcher" };
+    }
+    if (cmd.includes("cli.ts senate")) {
+      const q = cmd.match(/--whip\s+"([^"]+)"/)?.[1] || "votes";
+      return { detail: `Senate lookup: ${q}`, toolName: "senate", toolCategory: "fetcher" };
+    }
     return { detail: `Running: ${cmd.slice(0, 80)}`, toolName: "Bash", toolCategory: "bash" };
+  }
+  // MCP tool calls — extract module and function from tool name
+  if (toolName.startsWith("mcp__")) {
+    const parts = toolName.split("__");
+    const module = parts[2] || "gov";
+    const fn = parts.slice(3).join("_") || "";
+    const moduleLabels: Record<string, string> = {
+      treasury: "Treasury",
+      fred: "FRED",
+      bls: "Labor Stats",
+      bea: "BEA",
+      congress: "Congress",
+      fec: "FEC",
+      federalregister: "Fed Register",
+      regulations: "Regulations",
+      senatelobbying: "Lobbying",
+      sec: "SEC",
+      govinfo: "GovInfo",
+      usaspending: "USAspending",
+      fbi: "FBI",
+      census: "Census",
+    };
+    const label = moduleLabels[module] || module;
+    return { detail: `${label}: ${fn.replace(/_/g, " ")}`, toolName: `mcp-${module}`, toolCategory: "fetcher" };
   }
   return { detail: `Using ${toolName}...`, toolName, toolCategory: "thinking" };
 }
@@ -70,6 +114,7 @@ async function runAgent(
   allowedTools: string[] = ["WebSearch", "Bash"],
   onProgress?: (progress: ToolProgress) => void,
   signal?: AbortSignal,
+  useMcp = false,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const args = [
@@ -81,7 +126,19 @@ async function runAgent(
       "--dangerously-skip-permissions",
     ];
 
-    if (allowedTools.length > 0) {
+    if (useMcp) {
+      // Load MCP server config for government data tools
+      const mcpConfigPath = path.resolve(process.cwd(), ".claude", "mcp-agents.json");
+      if (fs.existsSync(mcpConfigPath)) {
+        args.push("--mcp-config", mcpConfigPath);
+      }
+      // MCP tools have dynamic names, so we can't allowlist them.
+      // Instead, block tools we don't want and let MCP tools through.
+      const disallowed = ["Read", "Edit", "Write", "Glob", "Grep"];
+      if (!allowedTools.includes("WebSearch")) disallowed.push("WebSearch");
+      if (!allowedTools.includes("Bash")) disallowed.push("Bash");
+      args.push("--disallowedTools", ...disallowed);
+    } else if (allowedTools.length > 0) {
       args.push("--allowedTools", ...allowedTools);
     } else {
       args.push("--disallowedTools", "Bash", "WebSearch", "Read", "Edit", "Write", "Glob", "Grep");
@@ -119,6 +176,33 @@ async function runAgent(
                 const toolName = block.name || "tool";
                 const input = block.input || {};
                 onProgress(classifyTool(toolName, input));
+              }
+              // Emit agent reasoning text as progress
+              if (block.type === "text" && block.text && onProgress) {
+                const text = (block.text as string).trim();
+                if (text.length > 0) {
+                  // Extract a meaningful snippet — first non-empty line, truncated
+                  const firstLine = text.split("\n").find((l: string) => l.trim().length > 0) || text;
+                  const snippet = firstLine.length > 150 ? firstLine.slice(0, 147) + "..." : firstLine;
+                  onProgress({
+                    detail: snippet,
+                    toolName: "reasoning",
+                    toolCategory: "reasoning",
+                  });
+                }
+              }
+              // Emit thinking blocks as progress
+              if (block.type === "thinking" && block.thinking && onProgress) {
+                const thinking = (block.thinking as string).trim();
+                if (thinking.length > 0) {
+                  const firstLine = thinking.split("\n").find((l: string) => l.trim().length > 0) || thinking;
+                  const snippet = firstLine.length > 150 ? firstLine.slice(0, 147) + "..." : firstLine;
+                  onProgress({
+                    detail: snippet,
+                    toolName: "thinking",
+                    toolCategory: "thinking",
+                  });
+                }
               }
             }
           }
@@ -299,7 +383,7 @@ export class PipelineRun {
         : prompts.evidenceBinary(title, resolutionCriteria, closeDate, yesPrice);
 
       const signal = this.abortController.signal;
-      const evidenceOutput = await runAgent("haiku", evidencePrompt, ["WebSearch", "Bash"], this.progressCallback("evidence"), signal);
+      const evidenceOutput = await runAgent("haiku", evidencePrompt, ["WebSearch", "Bash"], this.progressCallback("evidence"), signal, true);
       this.emitStage("evidence", "complete", {
         durationS: (Date.now() - t1) / 1000,
       });
@@ -354,7 +438,7 @@ export class PipelineRun {
         ? prompts.calibratorEvent(title, closeDate, outcomesText, subText, volume, evidenceOutput, daOutput, resolutionOutput, chaosOutput)
         : prompts.calibratorBinary(title, resolutionCriteria, closeDate, yesPrice, volume, evidenceOutput, daOutput, resolutionOutput, chaosOutput);
 
-      const calibratorOutput = await runAgent("opus", calibratorPrompt, [], this.progressCallback("calibrator"), signal);
+      const calibratorOutput = await runAgent("opus", calibratorPrompt, [], this.progressCallback("calibrator"), signal, true);
       this.emitStage("calibrator", "complete", {
         durationS: (Date.now() - t4) / 1000,
       });
@@ -381,7 +465,14 @@ export class PipelineRun {
       } as CompleteEvent);
     } catch (err) {
       if (this.cancelled) {
-        // Don't emit error for intentional cancellation
+        // Emit cancellation for any running stages so the UI reflects it
+        const stages: PipelineStage[] = ["fetch", "evidence", "devil_advocate", "resolution", "chaos", "calibrator"];
+        for (const s of stages) {
+          const ev = this.events.findLast((e) => e.kind === "stage" && (e as StageEvent).stage === s);
+          if (ev && (ev as StageEvent).status === "running") {
+            this.emitStage(s, "error", { detail: "Cancelled" });
+          }
+        }
         return;
       }
       // Find the running stage and mark it as error

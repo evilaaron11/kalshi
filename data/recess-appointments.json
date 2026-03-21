@@ -1,0 +1,122 @@
+[
+  {
+    "president": "Reagan",
+    "nominee": "William Clark",
+    "position": "Secretary of Interior",
+    "date": "1983-11-21",
+    "context": "Clark was serving as National Security Advisor; Reagan moved him to Interior via recess appointment after Senate recessed.",
+    "source": "historical"
+  },
+  {
+    "president": "Bush",
+    "nominee": "Otto Reich",
+    "position": "Assistant Secretary of State for Western Hemisphere Affairs",
+    "date": "2002-01-11",
+    "context": "Senate Democrats blocked floor vote; Bush used recess appointment during New Year recess.",
+    "source": "historical"
+  },
+  {
+    "president": "Bush",
+    "nominee": "John Bolton",
+    "position": "Ambassador to the United Nations",
+    "date": "2005-08-01",
+    "context": "Senate blocked confirmation vote over allegations Bolton intimidated intelligence analysts; Bush bypassed Senate during August recess.",
+    "source": "historical"
+  },
+  {
+    "president": "Bush",
+    "nominee": "Charles Pickering",
+    "position": "U.S. Court of Appeals, Fifth Circuit",
+    "date": "2004-01-16",
+    "context": "Senate Democrats filibustered nomination; Bush used recess appointment. Pickering later withdrew from future consideration.",
+    "source": "historical"
+  },
+  {
+    "president": "Clinton",
+    "nominee": "James Hormel",
+    "position": "Ambassador to Luxembourg",
+    "date": "1999-06-04",
+    "context": "Senate Republicans blocked floor vote, objecting to Hormel's advocacy for gay rights; Clinton used Memorial Day recess appointment.",
+    "source": "historical"
+  },
+  {
+    "president": "Clinton",
+    "nominee": "Roger Gregory",
+    "position": "U.S. Court of Appeals, Fourth Circuit",
+    "date": "2000-12-27",
+    "context": "First African-American judge on the Fourth Circuit; Clinton used recess appointment after Senate failed to schedule hearing.",
+    "source": "historical"
+  },
+  {
+    "president": "Obama",
+    "nominee": "Richard Cordray",
+    "position": "Director, Consumer Financial Protection Bureau",
+    "date": "2012-01-04",
+    "context": "Senate held pro-forma sessions to block recess; SCOTUS later ruled similar appointments invalid in NLRB v. Noel Canning (2014).",
+    "source": "historical"
+  },
+  {
+    "president": "Obama",
+    "nominee": "Sharon Block",
+    "position": "Member, National Labor Relations Board",
+    "date": "2012-01-04",
+    "context": "One of three NLRB recess appointments made on same day as Cordray; all invalidated by SCOTUS in NLRB v. Noel Canning (2014).",
+    "source": "historical"
+  },
+  {
+    "president": "Obama",
+    "nominee": "Terence Flynn",
+    "position": "Member, National Labor Relations Board",
+    "date": "2012-01-04",
+    "context": "Part of batch NLRB recess appointments; Senate held pro-forma sessions; SCOTUS invalidated in NLRB v. Noel Canning (2014).",
+    "source": "historical"
+  },
+  {
+    "president": "Obama",
+    "nominee": "Donald Berwick",
+    "position": "Administrator, Centers for Medicare and Medicaid Services",
+    "date": "2010-07-07",
+    "context": "Republicans threatened extended confirmation battle over Berwick's support for rationing concepts; Obama used July 4th recess appointment.",
+    "source": "historical"
+  },
+  {
+    "president": "Bush",
+    "nominee": "Eugene Scalia",
+    "position": "Solicitor, Department of Labor",
+    "date": "2002-01-11",
+    "context": "AFL-CIO and Senate Democrats blocked confirmation over Scalia's opposition to ergonomics regulations; Bush used recess appointment.",
+    "source": "historical"
+  },
+  {
+    "president": "Trump",
+    "nominee": "Matthew Whitaker",
+    "position": "Acting Attorney General",
+    "date": "2018-11-07",
+    "context": "Not a recess appointment — designated under Vacancies Reform Act after Sessions resignation; included here for context on bypass mechanisms.",
+    "source": "historical"
+  },
+  {
+    "president": "Reagan",
+    "nominee": "Edwin Meese",
+    "position": "Attorney General",
+    "date": "1985-02-25",
+    "context": "Meese nomination was delayed over a year by Senate investigations into financial improprieties; confirmed ultimately via standard vote after recess appointment expired.",
+    "source": "historical"
+  },
+  {
+    "president": "Clinton",
+    "nominee": "Bill Lann Lee",
+    "position": "Assistant Attorney General for Civil Rights",
+    "date": "1997-12-15",
+    "context": "Senate Republicans blocked confirmation vote over Lee's support for affirmative action; Clinton appointed him acting assistant AG, then formally recess-appointed.",
+    "source": "historical"
+  },
+  {
+    "president": "Obama",
+    "nominee": "Mel Watt",
+    "position": "Director, Federal Housing Finance Agency",
+    "date": "2013-12-27",
+    "context": "Senate Republicans blocked cloture votes repeatedly; Obama used recess appointment after Senate left for holiday break.",
+    "source": "historical"
+  }
+]
