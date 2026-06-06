@@ -1,8 +1,9 @@
 name: build
 
 # Self-hosted build-on-push: GitHub queues the job, the ARC controller scales up a
-# runner pod on tir-k3s (k3s on aaron-box), which builds the image with the in-cluster
-# rootless BuildKit and pushes it to the in-cluster registry. No image leaves the box.
+# runner pod on tir-k3s (k3s on aaron-box). containerMode=kubernetes runs the job in
+# its own pod, which builds the image with the in-cluster rootless BuildKit and pushes
+# it to the in-cluster registry. No image leaves the box.
 on:
   push:
     branches: [webApp]
@@ -11,15 +12,24 @@ on:
 jobs:
   build:
     runs-on: tir-k3s
+    # containerMode=kubernetes forbids container-less jobs. Use a glibc image so the
+    # runner-injected node (for actions/*) works; install the few build tools we need.
+    container:
+      image: debian:bookworm-slim
     steps:
+      - name: Install tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends curl ca-certificates tar git
+
       - uses: actions/checkout@v4
 
       - name: Install buildctl
         run: |
           VERSION=0.18.0
           curl -fsSL "https://github.com/moby/buildkit/releases/download/v${VERSION}/buildkit-v${VERSION}.linux-amd64.tar.gz" \
-            | tar -xz -C /tmp bin/buildctl
-          echo /tmp/bin >> "$GITHUB_PATH"
+            | tar -xz -C /usr/local bin/buildctl
+          buildctl --version
 
       - name: Build and push image
         env:
