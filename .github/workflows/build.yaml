@@ -46,10 +46,9 @@ jobs:
         env:
           GITOPS_DEPLOY_KEY: ${{ secrets.GITOPS_DEPLOY_KEY }}
         run: |
-          install -d -m 700 ~/.ssh
-          printf '%s\n' "$GITOPS_DEPLOY_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H github.com >> ~/.ssh/known_hosts 2>/dev/null
+          printf '%s\n' "$GITOPS_DEPLOY_KEY" > /tmp/ci_key
+          chmod 600 /tmp/ci_key
+          export GIT_SSH_COMMAND="ssh -i /tmp/ci_key -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=yes"
           git clone --depth 1 git@github.com:evilaaron11/tir-gitops.git /tmp/gitops
           cd /tmp/gitops
           sed -i "s#image: registry.registry.svc:5000/kalshi:.*#image: registry.registry.svc:5000/kalshi:${GITHUB_SHA}#" apps/kalshi/deployment.yaml
