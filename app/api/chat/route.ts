@@ -1,6 +1,6 @@
-import { spawn } from "child_process";
 import fs from "fs";
 import path from "path";
+import { runClaudeAgent } from "@evilaaron11/claude-gateway-client";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -76,77 +76,37 @@ export async function POST(request: Request) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     start(controller) {
-      const args = [
-        "-p",
-        "--verbose",
-        "--model", "sonnet",
-        "--output-format", "stream-json",
-        "--no-session-persistence",
-        "--dangerously-skip-permissions",
-        "--disallowedTools", "Bash", "WebSearch", "Read", "Edit", "Write", "Glob", "Grep",
-      ];
-
-      const env = { ...process.env };
-      delete env.CLAUDECODE;
-
-      const proc = spawn("claude", args, {
-        stdio: ["pipe", "pipe", "pipe"],
-        cwd: process.cwd(),
-        env,
-        shell: true,
-      });
-
-      let buffer = "";
-
-      proc.stdout.on("data", (chunk: Buffer) => {
-        buffer += chunk.toString();
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const event = JSON.parse(line);
-
-            if (event.type === "assistant" && event.message?.content) {
-              for (const block of event.message.content) {
-                if (block.type === "text" && block.text) {
-                  controller.enqueue(
-                    encoder.encode(`data: ${JSON.stringify({ type: "delta", text: block.text })}\n\n`)
-                  );
-                }
+      // Routes to the in-cluster claude-gateway when CLAUDE_GATEWAY_URL is set, otherwise
+      // spawns `claude` locally (dev). allowedTools:[] → read-only conversational mode.
+      runClaudeAgent(
+        { model: "sonnet", prompt, allowedTools: [], signal: request.signal },
+        (event) => {
+          if (event.type === "assistant" && event.message?.content) {
+            for (const block of event.message.content) {
+              if (block.type === "text" && block.text) {
+                controller.enqueue(
+                  encoder.encode(`data: ${JSON.stringify({ type: "delta", text: block.text })}\n\n`)
+                );
               }
             }
-
-            if (event.type === "result" && event.result) {
-              controller.enqueue(
-                encoder.encode(`data: ${JSON.stringify({ type: "done", text: event.result })}\n\n`)
-              );
-            }
-          } catch {
-            // skip malformed
           }
-        }
-      });
-
-      proc.on("close", () => {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "end" })}\n\n`));
-        controller.close();
-      });
-
-      proc.on("error", (err) => {
-        controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify({ type: "error", text: err.message })}\n\n`)
-        );
-        controller.close();
-      });
-
-      request.signal.addEventListener("abort", () => {
-        proc.kill();
-      });
-
-      proc.stdin.write(prompt);
-      proc.stdin.end();
+          if (event.type === "result" && event.result) {
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({ type: "done", text: event.result })}\n\n`)
+            );
+          }
+        },
+      )
+        .then(() => {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "end" })}\n\n`));
+          controller.close();
+        })
+        .catch((err: Error) => {
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ type: "error", text: err.message })}\n\n`)
+          );
+          controller.close();
+        });
     },
   });
 

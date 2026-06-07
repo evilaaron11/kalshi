@@ -35,11 +35,15 @@ jobs:
       - name: Build and push image
         env:
           REG: registry.registry.svc:5000/kalshi
+          # read:packages PAT — lets `npm ci` pull @evilaaron11/claude-gateway-client from
+          # GitHub Packages inside the buildkit build. Passed as a build secret, not a layer.
+          NODE_AUTH_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
         run: |
           buildctl --addr tcp://buildkitd.arc-runners.svc:1234 build \
             --frontend dockerfile.v0 \
             --local context=. \
             --local dockerfile=. \
+            --secret id=node_auth_token,env=NODE_AUTH_TOKEN \
             --output "type=image,\"name=${REG}:${GITHUB_SHA},${REG}:latest\",push=true"
 
       - name: Deploy — bump image tag in tir-gitops

@@ -12,6 +12,7 @@
     "fetch": "tsx lib/fetchers/cli.ts"
   },
   "dependencies": {
+    "@evilaaron11/claude-gateway-client": "^0.1.0",
     "cheerio": "^1.0.0",
     "dotenv": "^16.4.7",
     "next": "^15.1.0",

@@ -1,7 +1,7 @@
-import { spawn } from "child_process";
 import fs from "fs";
 import path from "path";
 import { fetchMarket } from "./kalshi";
+import { runClaudeAgent } from "@evilaaron11/claude-gateway-client";
 import type {
   MarketData,
   ParsedMarket,
@@ -116,139 +116,34 @@ async function runAgent(
   signal?: AbortSignal,
   useMcp = false,
 ): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const args = [
-      "-p",
-      "--model", model,
-      "--output-format", "stream-json",
-      "--verbose",
-      "--no-session-persistence",
-      "--dangerously-skip-permissions",
-    ];
-
-    if (useMcp) {
-      // Load MCP server config for government data tools
-      const mcpConfigPath = path.resolve(process.cwd(), ".claude", "mcp-agents.json");
-      if (fs.existsSync(mcpConfigPath)) {
-        args.push("--mcp-config", mcpConfigPath);
+  // Routes to the in-cluster claude-gateway when CLAUDE_GATEWAY_URL is set, otherwise
+  // spawns `claude` locally (dev without a gateway). The progress mapping below is
+  // backend-agnostic — it reads the same Claude Code stream-json events either way.
+  return runClaudeAgent({ model, prompt, allowedTools, useMcp, signal }, (event) => {
+    if (event.type !== "assistant" || !event.message?.content) return;
+    for (const block of event.message.content) {
+      if (block.type === "tool_use" && onProgress) {
+        onProgress(classifyTool(block.name || "tool", block.input || {}));
       }
-      // MCP tools have dynamic names, so we can't allowlist them.
-      // Instead, block tools we don't want and let MCP tools through.
-      const disallowed = ["Read", "Edit", "Write", "Glob", "Grep"];
-      if (!allowedTools.includes("WebSearch")) disallowed.push("WebSearch");
-      if (!allowedTools.includes("Bash")) disallowed.push("Bash");
-      args.push("--disallowedTools", ...disallowed);
-    } else if (allowedTools.length > 0) {
-      args.push("--allowedTools", ...allowedTools);
-    } else {
-      args.push("--disallowedTools", "Bash", "WebSearch", "Read", "Edit", "Write", "Glob", "Grep");
-    }
-
-    const env = { ...process.env };
-    delete env.CLAUDECODE;
-
-    const proc = spawn("claude", args, {
-      stdio: ["pipe", "pipe", "pipe"],
-      cwd: process.cwd(),
-      env,
-      shell: true,
-    });
-
-    let buffer = "";
-    let resultText = "";
-    let stderr = "";
-
-    proc.stdout.on("data", (chunk: Buffer) => {
-      buffer += chunk.toString();
-
-      // Parse newline-delimited JSON
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || ""; // keep incomplete line in buffer
-
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const event = JSON.parse(line);
-          // Extract progress info from streaming events
-          if (event.type === "assistant" && event.message?.content) {
-            for (const block of event.message.content) {
-              if (block.type === "tool_use" && onProgress) {
-                const toolName = block.name || "tool";
-                const input = block.input || {};
-                onProgress(classifyTool(toolName, input));
-              }
-              // Emit agent reasoning text as progress
-              if (block.type === "text" && block.text && onProgress) {
-                const text = (block.text as string).trim();
-                if (text.length > 0) {
-                  // Extract a meaningful snippet — first non-empty line, truncated
-                  const firstLine = text.split("\n").find((l: string) => l.trim().length > 0) || text;
-                  const snippet = firstLine.length > 150 ? firstLine.slice(0, 147) + "..." : firstLine;
-                  onProgress({
-                    detail: snippet,
-                    toolName: "reasoning",
-                    toolCategory: "reasoning",
-                  });
-                }
-              }
-              // Emit thinking blocks as progress
-              if (block.type === "thinking" && block.thinking && onProgress) {
-                const thinking = (block.thinking as string).trim();
-                if (thinking.length > 0) {
-                  const firstLine = thinking.split("\n").find((l: string) => l.trim().length > 0) || thinking;
-                  const snippet = firstLine.length > 150 ? firstLine.slice(0, 147) + "..." : firstLine;
-                  onProgress({
-                    detail: snippet,
-                    toolName: "thinking",
-                    toolCategory: "thinking",
-                  });
-                }
-              }
-            }
-          }
-          // Capture the final result
-          if (event.type === "result") {
-            resultText = event.result || "";
-          }
-        } catch {
-          // Skip malformed JSON lines
+      // Emit agent reasoning text as progress
+      if (block.type === "text" && block.text && onProgress) {
+        const text = (block.text as string).trim();
+        if (text.length > 0) {
+          const firstLine = text.split("\n").find((l: string) => l.trim().length > 0) || text;
+          const snippet = firstLine.length > 150 ? firstLine.slice(0, 147) + "..." : firstLine;
+          onProgress({ detail: snippet, toolName: "reasoning", toolCategory: "reasoning" });
         }
       }
-    });
-
-    proc.stderr.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-
-    proc.on("close", (code) => {
-      if (code === 0 && resultText) {
-        resolve(resultText);
-      } else if (code === 0) {
-        // Fallback: no result event found, shouldn't happen
-        resolve(buffer.trim());
-      } else {
-        reject(new Error(`Claude agent exited with code ${code}: ${stderr.slice(0, 500)}`));
+      // Emit thinking blocks as progress
+      if (block.type === "thinking" && block.thinking && onProgress) {
+        const thinking = (block.thinking as string).trim();
+        if (thinking.length > 0) {
+          const firstLine = thinking.split("\n").find((l: string) => l.trim().length > 0) || thinking;
+          const snippet = firstLine.length > 150 ? firstLine.slice(0, 147) + "..." : firstLine;
+          onProgress({ detail: snippet, toolName: "thinking", toolCategory: "thinking" });
+        }
       }
-    });
-
-    proc.on("error", (err) => {
-      reject(new Error(`Failed to spawn claude: ${err.message}`));
-    });
-
-    // Kill subprocess if cancelled
-    if (signal) {
-      if (signal.aborted) {
-        proc.kill();
-        reject(new Error("Cancelled"));
-        return;
-      }
-      signal.addEventListener("abort", () => {
-        proc.kill();
-      });
     }
-
-    proc.stdin.write(prompt);
-    proc.stdin.end();
   });
 }
 

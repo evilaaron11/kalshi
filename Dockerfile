@@ -5,8 +5,11 @@
 FROM node:22-alpine AS deps
 WORKDIR /app
 RUN apk add --no-cache libc6-compat
-COPY package.json package-lock.json ./
-RUN npm ci
+# .npmrc maps the @evilaaron11 scope to GitHub Packages; the token is mounted as a build
+# secret (never baked into a layer). buildkit provides it at /run/secrets/node_auth_token.
+COPY package.json package-lock.json .npmrc ./
+RUN --mount=type=secret,id=node_auth_token \
+    NODE_AUTH_TOKEN="$(cat /run/secrets/node_auth_token)" npm ci
 
 FROM node:22-alpine AS build
 WORKDIR /app
