@@ -182,7 +182,12 @@ Available as both a **web app** (Next.js dashboard with real-time SSE progress) 
 │   ├── kalshi.ts                Kalshi API client (RSA auth)
 │   ├── pipeline.ts              Agent orchestration (Claude CLI)
 │   ├── prompts.ts               Agent prompt templates
-│   ├── reportParser.ts          Report text → structured data
+│   ├── reportParser.ts          Report text → structured data (+ guardrail notes)
+│   ├── guardrails/              Output validators, retry, budgets, tool usage
+│   │   ├── calibrator.ts        Calibrator schema + probability sanity + cross-market
+│   │   ├── subagent.ts          Evidence + Devil's Advocate citation grounding
+│   │   ├── budgets.ts           Per-agent WebSearch budgets + applyToolBudget
+│   │   └── format.ts            "## Guardrail Notes" section writer
 │   ├── richTextUtils.ts         Markdown tokenizer + bullet parser
 │   ├── fetchers/                Primary-source data fetchers
 │   │   ├── cli.ts               CLI entry point for agents
@@ -208,7 +213,7 @@ Available as both a **web app** (Next.js dashboard with real-time SSE progress) 
 │   ├── confirmations.json       Historical confirmation outcomes (80 records)
 │   ├── cook-pvi.json            Cook PVI scores (143 records)
 │   └── recess-appointments.json Recess appointment history (15 records)
-├── __tests__/                   Vitest test suite (226+ tests across 17 files)
+├── __tests__/                   Vitest test suite (280+ tests across 19 files)
 ├── results/                     Analysis reports (markdown)
 ├── .mcp.json                    MCP server config (US Gov Open Data)
 ├── .vscode/mcp.json             VS Code MCP server config
@@ -237,6 +242,20 @@ The analysis pipeline runs 4 subagents + 1 calibrator as Claude CLI subprocesses
 Supports both **single binary markets** and **multi-outcome events**.
 
 The UI streams real-time progress including tool calls, reasoning text, and thinking — click any stage to expand its activity feed.
+
+## Guardrails
+
+Every agent output is validated against a typed schema before it reaches the user. When validation fails, the same agent is re-spawned once with the failing issues fed into the retry prompt. Anything that remains after retry is surfaced as a banner in the report UI and a `## Guardrail Notes` block at the top of the saved `.md`.
+
+| # | Guardrail | Scope | What it checks |
+|---|---|---|---|
+| 1 | Output schema | Calibrator, Evidence, DA | Required sections present; `CONFIDENCE` ∈ {low, medium, high}; ≥2 bullets per BULL/BEAR case; ≥2 KEY SOURCES; `ESTIMATED PROBABILITY` ∈ [1, 99] |
+| 2 | Probability sanity | Calibrator (event) | Sum of ranking estimates within ±10pp of `1 − subThresholdYesSum`, applied only when Kalshi's own prices show the event is mutually exclusive (total YES ∈ [0.85, 1.15]) |
+| 3 | Citation grounding | Evidence, DA | Evidence: `## SOURCES POOL` with ≥3 URL-bearing entries. DA: `## ADDITIONAL SOURCES` with ≥1 URL entry |
+| 4 | Tool budget | Evidence (7), DA (5), Calibrator (0) | Counts `WebSearch` tool-use blocks during streaming; soft cap surfaces overruns. Pipeline-wide totals tracked across all 5 agents and reported alongside per-agent counts |
+| 5 | Cross-market sanity | Calibrator (binary) | If Calibrator's estimate diverges from Polymarket/Metaculus/Manifold by >15pp, the `CROSS-MARKET COMPARISON` section must contain ≥25 words of justifying prose. Bypassed when no cross-market matches were found |
+
+The full `GuardrailReport` — per-agent issues, retry state, per-agent tool usage, and pipeline totals — is embedded as a JSON payload in an HTML comment under `## Guardrail Notes` so the parser can recover the structured state losslessly. Readable per-agent subsections follow it for direct `.md` viewing.
 
 ## Research Tools
 
@@ -369,4 +388,4 @@ The Calibrator produces a structured report including:
 - Cross-market price comparison
 - Full probability methodology
 
-Reports are saved to `results/YYYY-MM-DD_HHMM_{TICKER}.md`.
+Reports are saved to `results/YYYY-MM-DD_HHMM_{TICKER}.md`. When the guardrails surface any issues or tool usage, a `## Guardrail Notes` section is prepended to the report and a banner is shown in the UI — see [Guardrails](#guardrails).

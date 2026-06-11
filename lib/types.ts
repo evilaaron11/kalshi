@@ -106,6 +106,39 @@ export interface CompleteEvent {
 
 export type PipelineEvent = StageEvent | ProgressEvent | CompleteEvent;
 
+// --- Guardrails ---
+
+export type GuardrailAgent = "evidence" | "devils_advocate" | "calibrator";
+
+/** Counts of tool invocations during an agent run (or pipeline-wide). */
+export interface ToolUsage {
+  /** Number of WebSearch tool_use blocks. */
+  webSearch: number;
+  /** Bash + MCP + other non-search tool_use blocks combined. */
+  other: number;
+}
+
+export interface AgentGuardrailResult {
+  agent: GuardrailAgent;
+  /** Issues from the agent's first output. Empty if first attempt passed. */
+  initialIssues: string[];
+  /** Whether a retry was attempted. */
+  retried: boolean;
+  /** Issues remaining after retry (or after the only attempt if no retry). Empty means clean. */
+  finalIssues: string[];
+  /** Tool calls made by this agent (sum across initial + retry attempts). */
+  toolUsage: ToolUsage;
+}
+
+export interface GuardrailReport {
+  results: AgentGuardrailResult[];
+  /**
+   * Tool usage across the entire pipeline — includes Resolution + Chaos which
+   * do not have validators. Useful for cost monitoring across runs.
+   */
+  pipelineToolUsage: ToolUsage;
+}
+
 export interface RunInfo {
   runId: string;
   ticker: string;

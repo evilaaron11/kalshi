@@ -12,9 +12,33 @@ import type {
   ProgressEvent,
   CompleteEvent,
   ToolCategory,
+  GuardrailReport,
+  AgentGuardrailResult,
+  GuardrailAgent,
+  ToolUsage,
 } from "./types";
 import { isEventData } from "./types";
 import * as prompts from "./prompts";
+import {
+  validateCalibratorBinary,
+  validateCalibratorEvent,
+  buildRetryPrompt,
+  type SumCheckConfig,
+  type ValidationResult,
+} from "./guardrails/calibrator";
+import {
+  validateEvidenceAgent,
+  validateDevilsAdvocate,
+} from "./guardrails/subagent";
+import { formatGuardrailSection } from "./guardrails/format";
+import { applyToolBudget } from "./guardrails/budgets";
+
+// Mutually-exclusive sum check applies when total Kalshi YES prices across all event
+// markets (qualifying + sub-threshold) fall in this band — i.e., Kalshi's own pricing
+// treats the outcomes as a partition. Tolerance on Calibrator's ranking sum is ±10pp
+// off the expected (1 - subThresholdYesSum) target.
+const MUTEX_DETECT_BAND: [number, number] = [0.85, 1.15];
+const MUTEX_TOLERANCE = 0.10;
 
 // --- Claude CLI runner ---
 
@@ -154,9 +178,12 @@ export class PipelineRun {
   ticker: string;
   events: PipelineEvent[] = [];
   reportContent: string | null = null;
+  guardrailReport: GuardrailReport | null = null;
   private listeners: ((event: PipelineEvent | null) => void)[] = [];
   private abortController = new AbortController();
   private running = false;
+  /** Per-stage tool counts populated by progressCallback during streaming. */
+  private toolCounts: Map<PipelineStage, ToolUsage> = new Map();
 
   constructor(ticker: string) {
     this.runId = Math.random().toString(36).slice(2, 14);
@@ -192,7 +219,36 @@ export class PipelineRun {
   }
 
   private progressCallback(stage: PipelineStage) {
-    return (progress: ToolProgress) => this.emitProgress(stage, progress);
+    return (progress: ToolProgress) => {
+      // Tool counting: only count actual tool_use blocks (search/fetcher/bash).
+      // "thinking" and "reasoning" categories are text blocks, not tool calls.
+      if (progress.toolCategory === "search") {
+        this.bumpCount(stage, "webSearch");
+      } else if (progress.toolCategory === "fetcher" || progress.toolCategory === "bash") {
+        this.bumpCount(stage, "other");
+      }
+      this.emitProgress(stage, progress);
+    };
+  }
+
+  private bumpCount(stage: PipelineStage, kind: keyof ToolUsage) {
+    const cur = this.toolCounts.get(stage) ?? { webSearch: 0, other: 0 };
+    cur[kind]++;
+    this.toolCounts.set(stage, cur);
+  }
+
+  private getToolUsage(stage: PipelineStage): ToolUsage {
+    return this.toolCounts.get(stage) ?? { webSearch: 0, other: 0 };
+  }
+
+  private pipelineToolTotals(): ToolUsage {
+    let webSearch = 0;
+    let other = 0;
+    for (const u of this.toolCounts.values()) {
+      webSearch += u.webSearch;
+      other += u.other;
+    }
+    return { webSearch, other };
   }
 
   subscribe(fn: (event: PipelineEvent | null) => void): () => void {
@@ -212,6 +268,67 @@ export class PipelineRun {
 
   private signalEnd() {
     for (const listener of this.listeners) listener(null);
+  }
+
+  /**
+   * Run an agent, validate its output, and retry once if validation fails.
+   * Returns the final output (post-retry if one happened) and an AgentGuardrailResult
+   * describing what happened. Used identically for Evidence, Devil's Advocate, and Calibrator.
+   */
+  private async runWithGuardrail(opts: {
+    agent: GuardrailAgent;
+    stage: PipelineStage;
+    model: "haiku" | "sonnet" | "opus";
+    prompt: string;
+    allowedTools: string[];
+    useMcp?: boolean;
+    validate: (text: string) => ValidationResult;
+    signal: AbortSignal;
+  }): Promise<{ output: string; result: AgentGuardrailResult }> {
+    const initial = await runAgent(
+      opts.model,
+      opts.prompt,
+      opts.allowedTools,
+      this.progressCallback(opts.stage),
+      opts.signal,
+      opts.useMcp ?? false,
+    );
+
+    const firstCheck = opts.validate(initial);
+    const result: AgentGuardrailResult = {
+      agent: opts.agent,
+      initialIssues: firstCheck.issues,
+      retried: false,
+      finalIssues: firstCheck.issues,
+      toolUsage: this.getToolUsage(opts.stage),
+    };
+
+    if (firstCheck.ok || this.cancelled) {
+      applyToolBudget(result);
+      return { output: initial, result };
+    }
+
+    this.emitProgress(opts.stage, {
+      detail: `Validation failed (${firstCheck.issues.length} issue${firstCheck.issues.length === 1 ? "" : "s"}) — retrying`,
+      toolName: "guardrail",
+      toolCategory: "thinking",
+    });
+    const retryPrompt = buildRetryPrompt(opts.prompt, initial, firstCheck.issues);
+    const retry = await runAgent(
+      opts.model,
+      retryPrompt,
+      opts.allowedTools,
+      this.progressCallback(opts.stage),
+      opts.signal,
+      opts.useMcp ?? false,
+    );
+    const secondCheck = opts.validate(retry);
+    result.retried = true;
+    result.finalIssues = secondCheck.issues;
+    // Re-read tool usage after retry — counts accumulate via progressCallback for both attempts.
+    result.toolUsage = this.getToolUsage(opts.stage);
+    applyToolBudget(result);
+    return { output: retry, result };
   }
 
   async run(): Promise<void> {
@@ -270,6 +387,8 @@ export class PipelineRun {
         volume = pm.volume;
       }
 
+      const guardrailResults: AgentGuardrailResult[] = [];
+
       // --- Evidence ---
       this.emitStage("evidence", "running");
       const t1 = Date.now();
@@ -278,7 +397,18 @@ export class PipelineRun {
         : prompts.evidenceBinary(title, resolutionCriteria, closeDate, yesPrice);
 
       const signal = this.abortController.signal;
-      const evidenceOutput = await runAgent("haiku", evidencePrompt, ["WebSearch", "Bash"], this.progressCallback("evidence"), signal, true);
+      const evidenceRun = await this.runWithGuardrail({
+        agent: "evidence",
+        stage: "evidence",
+        model: "haiku",
+        prompt: evidencePrompt,
+        allowedTools: ["WebSearch", "Bash"],
+        useMcp: true,
+        validate: validateEvidenceAgent,
+        signal,
+      });
+      const evidenceOutput = evidenceRun.output;
+      guardrailResults.push(evidenceRun.result);
       this.emitStage("evidence", "complete", {
         durationS: (Date.now() - t1) / 1000,
       });
@@ -295,7 +425,17 @@ export class PipelineRun {
         ? prompts.devilsAdvocateEvent(title, closeDate, outcomesText, evidenceOutput, sourcesPool)
         : prompts.devilsAdvocateBinary(title, resolutionCriteria, closeDate, yesPrice, evidenceOutput, sourcesPool);
 
-      const daOutput = await runAgent("haiku", daPrompt, ["WebSearch", "Bash"], this.progressCallback("devil_advocate"), signal);
+      const daRun = await this.runWithGuardrail({
+        agent: "devils_advocate",
+        stage: "devil_advocate",
+        model: "haiku",
+        prompt: daPrompt,
+        allowedTools: ["WebSearch", "Bash"],
+        validate: validateDevilsAdvocate,
+        signal,
+      });
+      const daOutput = daRun.output;
+      guardrailResults.push(daRun.result);
       this.emitStage("devil_advocate", "complete", {
         durationS: (Date.now() - t2) / 1000,
       });
@@ -333,7 +473,40 @@ export class PipelineRun {
         ? prompts.calibratorEvent(title, closeDate, outcomesText, subText, volume, evidenceOutput, daOutput, resolutionOutput, chaosOutput)
         : prompts.calibratorBinary(title, resolutionCriteria, closeDate, yesPrice, volume, evidenceOutput, daOutput, resolutionOutput, chaosOutput);
 
-      const calibratorOutput = await runAgent("opus", calibratorPrompt, [], this.progressCallback("calibrator"), signal, true);
+      const expectedRankings = isEvent ? (marketData as EventData).markets.length : 0;
+      const sumCheck: SumCheckConfig | undefined = (() => {
+        if (!isEvent) return undefined;
+        const ed = marketData as EventData;
+        const qualSum = ed.markets.reduce((s, m) => s + m.yesPrice, 0);
+        const subSum = ed.subThresholdMarkets.reduce((s, m) => s + m.yesPrice, 0);
+        const totalSum = qualSum + subSum;
+        const [lo, hi] = MUTEX_DETECT_BAND;
+        if (totalSum < lo || totalSum > hi) return undefined;
+        return { expectedRankingSum: 1 - subSum, tolerance: MUTEX_TOLERANCE };
+      })();
+      const validateCalibrator = (text: string) =>
+        isEvent
+          ? validateCalibratorEvent(text, expectedRankings, sumCheck)
+          : validateCalibratorBinary(text);
+
+      const calibratorRun = await this.runWithGuardrail({
+        agent: "calibrator",
+        stage: "calibrator",
+        model: "opus",
+        prompt: calibratorPrompt,
+        allowedTools: [],
+        useMcp: true,
+        validate: validateCalibrator,
+        signal,
+      });
+      const calibratorOutput = calibratorRun.output;
+      guardrailResults.push(calibratorRun.result);
+
+      const guardrail: GuardrailReport = {
+        results: guardrailResults,
+        pipelineToolUsage: this.pipelineToolTotals(),
+      };
+      this.guardrailReport = guardrail;
       this.emitStage("calibrator", "complete", {
         durationS: (Date.now() - t4) / 1000,
       });
@@ -347,6 +520,7 @@ export class PipelineRun {
         daOutput,
         resolutionOutput,
         chaosOutput,
+        guardrail,
       );
       this.reportContent = fs.readFileSync(
         path.resolve(process.cwd(), reportPath),
@@ -401,6 +575,7 @@ function saveReport(
   da: string,
   resolution: string,
   chaos: string,
+  guardrail?: GuardrailReport,
 ): string {
   const projectRoot = process.cwd();
   const resultsDir = path.join(projectRoot, "results");
@@ -412,11 +587,13 @@ function saveReport(
   const filename = `${dateStr}_${timeStr}_${ticker}.md`;
   const filePath = path.join(resultsDir, filename);
 
+  const guardrailSection = formatGuardrailSection(guardrail);
+
   const report = `# Analysis: ${title}
 Generated: ${now.toISOString()}
 Ticker: ${ticker}
 
-## Calibrator Report
+${guardrailSection}## Calibrator Report
 ${calibrator}
 
 ## Evidence Agent

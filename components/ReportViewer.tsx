@@ -10,6 +10,103 @@ interface Props {
   report: ParsedReport;
 }
 
+const GUARDRAIL_AGENT_LABEL: Record<string, string> = {
+  evidence: "Evidence Agent",
+  devils_advocate: "Devil's Advocate",
+  calibrator: "Calibrator",
+};
+
+function GuardrailBanner({ notes }: { notes: NonNullable<ParsedReport["guardrailNotes"]> }) {
+  const [open, setOpen] = useState(false);
+
+  const dirty = notes.results.filter((r) => r.initialIssues.length > 0);
+  if (dirty.length === 0) return null;
+
+  const totalInitial = dirty.reduce((s, r) => s + r.initialIssues.length, 0);
+  const totalRemaining = dirty.reduce((s, r) => s + r.finalIssues.length, 0);
+  const severe = totalRemaining > 0;
+  const usage = notes.pipelineToolUsage;
+  const hasUsage = usage.webSearch > 0 || usage.other > 0;
+
+  const colorClasses = severe
+    ? "bg-yellow-900/30 border-yellow-700/50 text-yellow-200"
+    : "bg-blue-900/20 border-blue-700/40 text-blue-200";
+
+  const agentList = dirty.map((r) => GUARDRAIL_AGENT_LABEL[r.agent] || r.agent).join(", ");
+  const headline = severe
+    ? `${totalRemaining} validation issue${totalRemaining === 1 ? "" : "s"} remained after retry (${agentList})`
+    : `Auto-corrected ${totalInitial} initial issue${totalInitial === 1 ? "" : "s"} via retry (${agentList})`;
+
+  return (
+    <div className={`border rounded-lg px-3 py-2 text-xs ${colorClasses}`}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center justify-between w-full text-left"
+      >
+        <span className="font-medium">
+          <span className="mr-1.5">{severe ? "⚠" : "ℹ"}</span>
+          {headline}
+        </span>
+        <span className="opacity-60 text-[10px] uppercase tracking-wide">
+          {open ? "hide" : "details"}
+        </span>
+      </button>
+      {open && (
+        <div className="mt-2 pt-2 border-t border-current/20 space-y-3">
+          {hasUsage && (
+            <div className="text-[11px] opacity-70">
+              Pipeline tool usage: {usage.webSearch} WebSearch, {usage.other} other
+            </div>
+          )}
+          {dirty.map((r) => (
+            <div key={r.agent}>
+              <div className="text-[11px] uppercase tracking-wide font-semibold mb-1">
+                {GUARDRAIL_AGENT_LABEL[r.agent] || r.agent}
+                {r.toolUsage.webSearch + r.toolUsage.other > 0 && (
+                  <span className="ml-2 opacity-50 normal-case font-normal">
+                    ({r.toolUsage.webSearch} WS, {r.toolUsage.other} other)
+                  </span>
+                )}
+                {r.retried && (
+                  <span className="ml-2 opacity-60 normal-case font-normal">
+                    {r.finalIssues.length > 0 ? "(retried — issues remained)" : "(retried — resolved)"}
+                  </span>
+                )}
+              </div>
+              <div className="space-y-2">
+                {r.initialIssues.length > 0 && (
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wide opacity-60 mb-0.5">
+                      Initial issues
+                    </div>
+                    <ul className="space-y-0.5 list-disc list-inside">
+                      {r.initialIssues.map((i, idx) => (
+                        <li key={idx}>{i}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {r.retried && r.finalIssues.length > 0 && (
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wide opacity-60 mb-0.5">
+                      Remaining after retry
+                    </div>
+                    <ul className="space-y-0.5 list-disc list-inside">
+                      {r.finalIssues.map((i, idx) => (
+                        <li key={idx}>{i}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ConfidenceBadge({ level }: { level: string }) {
   const colors =
     level === "high"
@@ -319,6 +416,12 @@ export default function ReportViewer({ report }: Props) {
 
   return (
     <div className="space-y-3">
+      {/* === Guardrail banner (only if validator flagged something) === */}
+      {report.guardrailNotes &&
+        report.guardrailNotes.results.some((r) => r.initialIssues.length > 0) && (
+          <GuardrailBanner notes={report.guardrailNotes} />
+        )}
+
       {/* === Verdict Header === */}
       <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-4">
         {/* Meta line */}

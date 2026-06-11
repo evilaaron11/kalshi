@@ -75,8 +75,35 @@ export interface ParsedReport {
   // Delta analysis (if present)
   deltaAnalysis: string | null;
 
+  // Guardrail notes (if validation flagged issues)
+  guardrailNotes: GuardrailNotes | null;
+
   // Raw calibrator text (fallback)
   rawCalibrator: string;
+}
+
+export type GuardrailAgentName = "evidence" | "devils_advocate" | "calibrator";
+
+export interface GuardrailToolUsage {
+  webSearch: number;
+  other: number;
+}
+
+export interface GuardrailAgentNotes {
+  agent: GuardrailAgentName;
+  retried: boolean;
+  initialIssues: string[];
+  finalIssues: string[];
+  /** Defaults to zeros when parsed from legacy markdown without usage data. */
+  toolUsage: GuardrailToolUsage;
+}
+
+export interface GuardrailNotes {
+  results: GuardrailAgentNotes[];
+  /** Pipeline-wide totals across all 5 agents. Zeros when not present in source. */
+  pipelineToolUsage: GuardrailToolUsage;
+  /** Raw markdown body of the section, kept for display fallback. */
+  raw: string;
 }
 
 /**
@@ -85,6 +112,7 @@ export interface ParsedReport {
  * are NOT top-level — they belong to the parent section.
  */
 const TOP_LEVEL_HEADERS = [
+  "## Guardrail Notes",
   "## Calibrator Report",
   "## Evidence Agent",
   "## Devil's Advocate",
@@ -259,6 +287,8 @@ export function parseReport(raw: string): ParsedReport {
   const resolutionSection = extractTopLevelSection(raw, "## Resolution Analysis");
   const chaosSection = extractTopLevelSection(raw, "## Chaos Agent");
   const deltaSection = extractTopLevelSection(raw, "## Delta Analysis");
+  const guardrailSection = extractTopLevelSection(raw, "## Guardrail Notes");
+  const guardrailNotes = guardrailSection ? parseGuardrailNotes(guardrailSection) : null;
 
   // Parse header
   const titleMatch = raw.match(/^# Analysis:\s*(.+)/m);
@@ -334,8 +364,97 @@ export function parseReport(raw: string): ParsedReport {
     resolutionAnalysis: resolutionSection,
     chaosAgent: chaosSection,
     deltaAnalysis: deltaSection,
+    guardrailNotes,
     rawCalibrator: calibratorSection,
   };
+}
+
+const ZERO_USAGE: GuardrailToolUsage = { webSearch: 0, other: 0 };
+
+function parseGuardrailNotes(section: string): GuardrailNotes {
+  // Prefer the structured JSON embedded as an HTML comment — saveReport writes this
+  // alongside the human-readable markdown so we can recover state losslessly.
+  const jsonMatch = section.match(/<!--guardrail-data:\s*([\s\S]*?)-->/);
+  if (jsonMatch) {
+    try {
+      const data = JSON.parse(jsonMatch[1].trim());
+      if (Array.isArray(data?.results)) {
+        const results: GuardrailAgentNotes[] = data.results.map((r: GuardrailAgentNotes) => ({
+          agent: r.agent,
+          retried: r.retried,
+          initialIssues: r.initialIssues || [],
+          finalIssues: r.finalIssues || [],
+          toolUsage: r.toolUsage || { ...ZERO_USAGE },
+        }));
+        return {
+          results,
+          pipelineToolUsage: data.pipelineToolUsage || { ...ZERO_USAGE },
+          raw: section,
+        };
+      }
+    } catch {
+      // Fall through to markdown parsing if the JSON is malformed.
+    }
+  }
+
+  // Markdown fallback: parse "### Evidence Agent" subsections.
+  const agentMap: Record<string, GuardrailAgentName> = {
+    "Evidence Agent": "evidence",
+    "Devil's Advocate": "devils_advocate",
+    Calibrator: "calibrator",
+  };
+  const results: GuardrailAgentNotes[] = [];
+  // Prepend a newline so the first "### Header" (which may be at position 0 after trim)
+  // matches the split delimiter too.
+  const subSections = `\n${section}`.split(/\n###\s+/);
+  for (const block of subSections.slice(1)) {
+    const headerLine = block.split("\n", 1)[0].trim();
+    const agent = agentMap[headerLine];
+    if (!agent) continue;
+
+    const retried = /Retried once/i.test(block);
+    const initialIssues: string[] = [];
+    const finalIssues: string[] = [];
+    let bucket: "initial" | "final" | null = null;
+
+    // Tool usage line: "Tool usage: 7 WebSearch, 3 other."
+    const usageMatch = block.match(/Tool usage:\s*(\d+)\s+WebSearch,\s*(\d+)\s+other/i);
+    const toolUsage: GuardrailToolUsage = usageMatch
+      ? { webSearch: parseInt(usageMatch[1], 10), other: parseInt(usageMatch[2], 10) }
+      : { ...ZERO_USAGE };
+
+    for (const rawLine of block.split("\n")) {
+      const line = rawLine.trim();
+      if (/^\*\*Initial issues/i.test(line) || /^\*\*Issues:/i.test(line)) {
+        bucket = "initial";
+        continue;
+      }
+      if (/^\*\*Remaining after retry/i.test(line)) {
+        bucket = "final";
+        continue;
+      }
+      if (bucket && line.startsWith("- ")) {
+        const item = line.slice(2).trim();
+        if (item) (bucket === "initial" ? initialIssues : finalIssues).push(item);
+      }
+    }
+
+    results.push({
+      agent,
+      retried,
+      initialIssues,
+      finalIssues: retried ? finalIssues : initialIssues,
+      toolUsage,
+    });
+  }
+
+  // Pipeline totals line: "Pipeline tool usage: N WebSearch, M other."
+  const pipelineMatch = section.match(/Pipeline tool usage:\s*(\d+)\s+WebSearch,\s*(\d+)\s+other/i);
+  const pipelineToolUsage: GuardrailToolUsage = pipelineMatch
+    ? { webSearch: parseInt(pipelineMatch[1], 10), other: parseInt(pipelineMatch[2], 10) }
+    : { ...ZERO_USAGE };
+
+  return { results, pipelineToolUsage, raw: section };
 }
 
 /**
